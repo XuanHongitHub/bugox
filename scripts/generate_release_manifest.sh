@@ -15,24 +15,26 @@ fi
 
 NOW_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-jq -n \
-  --arg browser "$BROWSER_NAME" \
-  --arg version "$VERSION" \
-  --arg channel "$CHANNEL" \
-  --arg asset_url "$ASSET_URL" \
-  --arg sha256 "$SHA256" \
-  --arg released_at "$NOW_UTC" \
-  '{
-    schema: "buglogin.browser.release.v1",
-    browser: $browser,
-    channel: $channel,
-    version: $version,
-    platform: "win-x64",
-    artifact: {
-      url: $asset_url,
-      sha256: $sha256
+python3 - "$BROWSER_NAME" "$VERSION" "$CHANNEL" "$ASSET_URL" "$SHA256" "$NOW_UTC" "$OUT" <<'PY'
+import json
+import sys
+
+browser, version, channel, asset_url, sha256, released_at, out = sys.argv[1:]
+payload = {
+    "schema": "buglogin.browser.release.v1",
+    "browser": browser,
+    "channel": channel,
+    "version": version,
+    "platform": "win-x64",
+    "artifact": {
+        "url": asset_url,
+        "sha256": sha256,
     },
-    released_at: $released_at
-  }' > "$OUT"
+    "released_at": released_at,
+}
+with open(out, "w", encoding="utf-8") as f:
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+PY
 
 echo "manifest written to $OUT"

@@ -115,17 +115,17 @@ jobs:
 
           def detect_platform(asset_name: str) -> str | None:
             name = asset_name.lower()
-            if re.search(r"(win|windows).*(arm64|aarch64)|installer_arm64", name):
+            if re.search(r"(win|windows).*(arm64|aarch64)|installer_arm64|win[._-]?arm64", name):
               return "windows-arm64"
-            if re.search(r"(win|windows).*(x64|amd64)|installer_x64|win64", name):
+            if re.search(r"(win|windows).*(x64|amd64|x86_64)|installer_x64|win64|win[._-]?(x64|x86_64)", name):
               return "windows-x64"
-            if re.search(r"(linux).*(arm64|aarch64)", name):
+            if re.search(r"(linux|lin).*(arm64|aarch64)|lin[._-]?arm64", name):
               return "linux-arm64"
-            if re.search(r"(linux).*(x64|amd64)", name):
+            if re.search(r"(linux|lin).*(x64|amd64|x86_64)|lin[._-]?(x64|x86_64)", name):
               return "linux-x64"
-            if re.search(r"(mac|darwin|osx).*(arm64|aarch64)", name):
+            if re.search(r"(mac|darwin|osx).*(arm64|aarch64)|mac[._-]?arm64", name):
               return "macos-arm64"
-            if re.search(r"(mac|darwin|osx).*(x64|x86_64|amd64)", name):
+            if re.search(r"(mac|darwin|osx).*(x64|x86_64|amd64)|mac[._-]?(x64|x86_64)", name):
               return "macos-x64"
             return None
 

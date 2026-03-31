@@ -34,33 +34,10 @@ jobs:
           ASSET_URL="${{ github.event.inputs.asset_url }}"
           SHA256="${{ github.event.inputs.sha256 }}"
           if [[ -z "$ASSET_URL" && "${{ github.event_name }}" == "release" ]]; then
-            ASSET_URL="$(python3 - "$GITHUB_EVENT_PATH" <<'PY'
-import json
-import sys
-
-event = json.load(open(sys.argv[1], encoding="utf-8"))
-assets = ((event.get("release") or {}).get("assets") or [])
-print((assets[0] or {}).get("browser_download_url", "") if assets else "")
-PY
-)"
+            ASSET_URL="$(python3 -c 'import json,sys; e=json.load(open(sys.argv[1], encoding="utf-8")); a=((e.get("release") or {}).get("assets") or []); print((a[0].get("browser_download_url", "") if a else ""))' "$GITHUB_EVENT_PATH")"
           fi
           if [[ -z "$SHA256" && "${{ github.event_name }}" == "release" ]]; then
-            SHA_ASSET_URL="$(python3 - "$GITHUB_EVENT_PATH" <<'PY'
-import json
-import re
-import sys
-
-event = json.load(open(sys.argv[1], encoding="utf-8"))
-assets = ((event.get("release") or {}).get("assets") or [])
-pattern = re.compile(r"sha256|sha256sum|checksums?", re.IGNORECASE)
-match = ""
-for asset in assets:
-    if pattern.search(str(asset.get("name", ""))):
-        match = asset.get("browser_download_url", "")
-        break
-print(match)
-PY
-)"
+            SHA_ASSET_URL="$(python3 -c 'import json,re,sys; e=json.load(open(sys.argv[1], encoding="utf-8")); a=((e.get("release") or {}).get("assets") or []); p=re.compile(r\"sha256|sha256sum|checksums?\", re.I); print(next((x.get(\"browser_download_url\", \"\") for x in a if p.search(str(x.get(\"name\", \"\")))), \"\"))' "$GITHUB_EVENT_PATH")"
             if [[ -n "$SHA_ASSET_URL" ]]; then
               SHA256="$(curl -fsSL "$SHA_ASSET_URL" | awk 'match($0,/[A-Fa-f0-9]{64}/){ print substr($0,RSTART,RLENGTH); exit }')"
             fi

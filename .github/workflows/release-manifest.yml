@@ -58,9 +58,15 @@ jobs:
           files: release-manifest.json
 
       - name: Publish manifest to BugLogin API
-        if: ${{ secrets.BUGLOGIN_RELEASE_API_URL != '' && secrets.BUGLOGIN_RELEASE_API_TOKEN != '' }}
+        env:
+          BUGLOGIN_RELEASE_API_URL: ${{ secrets.BUGLOGIN_RELEASE_API_URL }}
+          BUGLOGIN_RELEASE_API_TOKEN: ${{ secrets.BUGLOGIN_RELEASE_API_TOKEN }}
         run: |
-          curl -fsSL -X POST "${{ secrets.BUGLOGIN_RELEASE_API_URL }}" \
-            -H "Authorization: Bearer ${{ secrets.BUGLOGIN_RELEASE_API_TOKEN }}" \
+          if [[ -z "${BUGLOGIN_RELEASE_API_URL}" || -z "${BUGLOGIN_RELEASE_API_TOKEN}" ]]; then
+            echo "Missing BUGLOGIN_RELEASE_API_URL or BUGLOGIN_RELEASE_API_TOKEN; skipping API publish."
+            exit 0
+          fi
+          curl -fsSL -X POST "${BUGLOGIN_RELEASE_API_URL}" \
+            -H "Authorization: Bearer ${BUGLOGIN_RELEASE_API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data-binary @release-manifest.json

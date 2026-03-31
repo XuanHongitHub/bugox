@@ -26,7 +26,7 @@ jobs:
       - name: Resolve latest upstream tag
         id: tag
         run: |
-          LATEST_TAG=$(git tag --list --sort=-v:refname | head -n 1)
+          LATEST_TAG=$(git ls-remote --tags --refs upstream | sed -E "s#.*refs/tags/##" | grep -Ev "^smoke-" | sort -V | tail -n 1)
           if [[ -z "$LATEST_TAG" ]]; then
             echo "No upstream tag found" >&2
             exit 1

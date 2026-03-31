@@ -1,0 +1,6 @@
+{
+  "browser": "bugox",
+  "engine": "firefox",
+  "channel": "stable",
+  "manifest_schema": "v1"
+}

@@ -1,0 +1,57 @@
+name: Release Manifest & API Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version override (defaults to tag name)"
+        required: false
+      asset_url:
+        description: "Artifact URL override"
+        required: false
+      sha256:
+        description: "SHA256 override"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve metadata
+        id: meta
+        run: |
+          VERSION="${{ github.event.inputs.version }}"
+          if [[ -z "$VERSION" ]]; then
+            VERSION="${GITHUB_REF_NAME}"
+          fi
+          ASSET_URL="${{ github.event.inputs.asset_url }}"
+          SHA256="${{ github.event.inputs.sha256 }}"
+          ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Upload manifest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bugox-release-manifest-${{ steps.meta.outputs.version }}
+          path: release-manifest.json
+
+      - name: Attach manifest to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-manifest.json
+
+      - name: Publish manifest to BugLogin API
+        if: ${{ secrets.BUGLOGIN_RELEASE_API_URL != '' && secrets.BUGLOGIN_RELEASE_API_TOKEN != '' }}
+        run: |
+          curl -fsSL -X POST "${{ secrets.BUGLOGIN_RELEASE_API_URL }}" \
+            -H "Authorization: Bearer ${{ secrets.BUGLOGIN_RELEASE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data-binary @release-manifest.json

@@ -1,0 +1,44 @@
+name: Upstream Release Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "11 */6 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync-release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream tags
+        run: |
+          git remote add upstream https://github.com/daijro/camoufox.git || true
+          git fetch --tags upstream
+
+      - name: Resolve latest upstream tag
+        id: tag
+        run: |
+          LATEST_TAG=$(git tag --list --sort=-v:refname | head -n 1)
+          if [[ -z "$LATEST_TAG" ]]; then
+            echo "No upstream tag found" >&2
+            exit 1
+          fi
+          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Create release from upstream tag if missing
+        run: |
+          TAG="${{ steps.tag.outputs.latest_tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            exit 0
+          fi
+          git push origin "refs/tags/$TAG" || true
+          gh release create "$TAG" --generate-notes --title "$TAG"

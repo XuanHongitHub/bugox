@@ -605,3 +605,17 @@ Web scraping & testing:
 UI theming:
 
 - [Jamir-boop/minimalisticfox](https://github.com/Jamir-boop/minimalisticfox): Inspired Camoufox's minimal css theming [(link)](https://github.com/daijro/camoufox/blob/main/settings/chrome.css)
+
+---
+
+## BugLogin Distribution Layer
+
+This fork is branded and distributed as **Bugox** for BugLogin.
+
+### Automation workflows
+- `Upstream Sync`: merges latest `daijro/camoufox` into `main` on schedule.
+- `Release Manifest & API Publish`: generates `release-manifest.json` and optionally pushes to BugLogin release API.
+
+### Required repository secrets
+- `BUGLOGIN_RELEASE_API_URL`
+- `BUGLOGIN_RELEASE_API_TOKEN`

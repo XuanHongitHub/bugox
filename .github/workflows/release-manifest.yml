@@ -42,7 +42,7 @@ jobs:
               SHA256="$(curl -fsSL "$SHA_ASSET_URL" | awk 'match($0,/[A-Fa-f0-9]{64}/){ print substr($0,RSTART,RLENGTH); exit }')"
             fi
           fi
-          ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json
+          bash ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Upload manifest artifact

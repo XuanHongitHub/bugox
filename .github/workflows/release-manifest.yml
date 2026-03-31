@@ -14,6 +14,24 @@ on:
       sha256:
         description: "SHA256 override"
         required: false
+      platform:
+        description: "Target platform key (windows-x64, linux-x64, ...)"
+        required: false
+        default: "windows-x64"
+      update_mode:
+        description: "Update mode (optional|required)"
+        required: false
+        default: "optional"
+      update_required:
+        description: "Force required update (true/false)"
+        required: false
+        default: "false"
+      min_supported_version:
+        description: "Minimum supported version (required threshold)"
+        required: false
+      update_message:
+        description: "Human-readable update note"
+        required: false
 
 permissions:
   contents: write
@@ -33,6 +51,14 @@ jobs:
           fi
           ASSET_URL="${{ github.event.inputs.asset_url }}"
           SHA256="${{ github.event.inputs.sha256 }}"
+          PLATFORM="${{ github.event.inputs.platform }}"
+          UPDATE_MODE="${{ github.event.inputs.update_mode }}"
+          UPDATE_REQUIRED="${{ github.event.inputs.update_required }}"
+          MIN_SUPPORTED_VERSION="${{ github.event.inputs.min_supported_version }}"
+          UPDATE_MESSAGE="${{ github.event.inputs.update_message }}"
+          if [[ -z "$PLATFORM" ]]; then PLATFORM="windows-x64"; fi
+          if [[ -z "$UPDATE_MODE" ]]; then UPDATE_MODE="optional"; fi
+          if [[ -z "$UPDATE_REQUIRED" ]]; then UPDATE_REQUIRED="false"; fi
           if [[ -z "$ASSET_URL" && "${{ github.event_name }}" == "release" ]]; then
             ASSET_URL="$(python3 -c 'import json,sys; e=json.load(open(sys.argv[1], encoding="utf-8")); a=((e.get("release") or {}).get("assets") or []); print((a[0].get("browser_download_url", "") if a else ""))' "$GITHUB_EVENT_PATH")"
           fi
@@ -42,7 +68,7 @@ jobs:
               SHA256="$(curl -fsSL "$SHA_ASSET_URL" | awk 'match($0,/[A-Fa-f0-9]{64}/){ print substr($0,RSTART,RLENGTH); exit }')"
             fi
           fi
-          bash ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json
+          bash ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json "$PLATFORM" "$UPDATE_MODE" "$UPDATE_REQUIRED" "$MIN_SUPPORTED_VERSION" "$UPDATE_MESSAGE"
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Upload manifest artifact

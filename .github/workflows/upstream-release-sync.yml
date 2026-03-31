@@ -7,38 +7,54 @@ on:
 
 permissions:
   contents: write
+  actions: write
 
 jobs:
   sync-release:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      UPSTREAM_REPO: daijro/camoufox
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Fetch upstream tags
+      - name: Resolve latest upstream release
+        id: latest
         run: |
-          git remote add upstream https://github.com/daijro/camoufox.git || true
-          git fetch --tags upstream
-
-      - name: Resolve latest upstream tag
-        id: tag
-        run: |
-          LATEST_TAG=$(git ls-remote --tags --refs upstream | sed -E "s#.*refs/tags/##" | grep -Ev "^smoke-" | sort -V | tail -n 1)
-          if [[ -z "$LATEST_TAG" ]]; then
-            echo "No upstream tag found" >&2
+          TAG="$(gh api repos/${UPSTREAM_REPO}/releases/latest --jq '.tag_name')"
+          if [[ -z "${TAG}" ]]; then
+            echo "Failed to resolve latest upstream release tag." >&2
             exit 1
           fi
-          echo "latest_tag=$LATEST_TAG" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Create release from upstream tag if missing
+      - name: Skip when already released in fork
+        id: existing
         run: |
-          TAG="${{ steps.tag.outputs.latest_tag }}"
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists"
-            exit 0
+          TAG="${{ steps.latest.outputs.tag }}"
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Release ${TAG} already exists in fork."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
-          git push origin "refs/tags/$TAG" || true
-          gh release create "$TAG" --generate-notes --title "$TAG"
+
+      - name: Mirror upstream release assets
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          TAG="${{ steps.latest.outputs.tag }}"
+          mkdir -p upstream-assets
+          gh release download "${TAG}" --repo "${UPSTREAM_REPO}" --dir upstream-assets
+          if [[ -z "$(ls -A upstream-assets)" ]]; then
+            echo "Upstream release ${TAG} has no assets; refusing to create empty release." >&2
+            exit 1
+          fi
+          gh release create "${TAG}" --title "${TAG}" --generate-notes
+          gh release upload "${TAG}" upstream-assets/*
+
+      - name: Trigger manifest publish
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          gh workflow run release-manifest.yml --ref "${GITHUB_REF_NAME}" -f version="${{ steps.latest.outputs.tag }}"

@@ -6,31 +6,28 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version override (defaults to tag name)"
+        description: "Release tag version (default: latest release)"
         required: false
       asset_url:
-        description: "Artifact URL override"
-        required: false
-      sha256:
-        description: "SHA256 override"
+        description: "Force a single download URL for selected platform"
         required: false
       platform:
-        description: "Target platform key (windows-x64, linux-x64, ...)"
+        description: "Platform key for asset_url override"
         required: false
         default: "windows-x64"
       update_mode:
-        description: "Update mode (optional|required)"
+        description: "optional|required"
         required: false
         default: "optional"
       update_required:
-        description: "Force required update (true/false)"
+        description: "true|false"
         required: false
         default: "false"
       min_supported_version:
-        description: "Minimum supported version (required threshold)"
+        description: "Minimum supported version for forced upgrades"
         required: false
       update_message:
-        description: "Human-readable update note"
+        description: "Human-readable update message"
         required: false
 
 permissions:
@@ -39,43 +36,160 @@ permissions:
 jobs:
   manifest:
     runs-on: ubuntu-latest
+    env:
+      BROWSER_SLUG: bugox
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Resolve metadata
-        id: meta
+      - name: Resolve release metadata and build manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_ASSET_URL: ${{ github.event.inputs.asset_url }}
+          INPUT_PLATFORM: ${{ github.event.inputs.platform }}
+          INPUT_UPDATE_MODE: ${{ github.event.inputs.update_mode }}
+          INPUT_UPDATE_REQUIRED: ${{ github.event.inputs.update_required }}
+          INPUT_MIN_SUPPORTED_VERSION: ${{ github.event.inputs.min_supported_version }}
+          INPUT_UPDATE_MESSAGE: ${{ github.event.inputs.update_message }}
         run: |
-          VERSION="${{ github.event.inputs.version }}"
-          if [[ -z "$VERSION" ]]; then
-            VERSION="${GITHUB_REF_NAME}"
-          fi
-          ASSET_URL="${{ github.event.inputs.asset_url }}"
-          SHA256="${{ github.event.inputs.sha256 }}"
-          PLATFORM="${{ github.event.inputs.platform }}"
-          UPDATE_MODE="${{ github.event.inputs.update_mode }}"
-          UPDATE_REQUIRED="${{ github.event.inputs.update_required }}"
-          MIN_SUPPORTED_VERSION="${{ github.event.inputs.min_supported_version }}"
-          UPDATE_MESSAGE="${{ github.event.inputs.update_message }}"
-          if [[ -z "$PLATFORM" ]]; then PLATFORM="windows-x64"; fi
-          if [[ -z "$UPDATE_MODE" ]]; then UPDATE_MODE="optional"; fi
-          if [[ -z "$UPDATE_REQUIRED" ]]; then UPDATE_REQUIRED="false"; fi
-          if [[ -z "$ASSET_URL" && "${{ github.event_name }}" == "release" ]]; then
-            ASSET_URL="$(python3 -c 'import json,sys; e=json.load(open(sys.argv[1], encoding="utf-8")); a=((e.get("release") or {}).get("assets") or []); print((a[0].get("browser_download_url", "") if a else ""))' "$GITHUB_EVENT_PATH")"
-          fi
-          if [[ -z "$SHA256" && "${{ github.event_name }}" == "release" ]]; then
-            SHA_ASSET_URL="$(python3 -c 'import json,re,sys; e=json.load(open(sys.argv[1], encoding="utf-8")); a=((e.get("release") or {}).get("assets") or []); p=re.compile(r\"sha256|sha256sum|checksums?\", re.I); print(next((x.get(\"browser_download_url\", \"\") for x in a if p.search(str(x.get(\"name\", \"\")))), \"\"))' "$GITHUB_EVENT_PATH")"
-            if [[ -n "$SHA_ASSET_URL" ]]; then
-              SHA256="$(curl -fsSL "$SHA_ASSET_URL" | awk 'match($0,/[A-Fa-f0-9]{64}/){ print substr($0,RSTART,RLENGTH); exit }')"
-            fi
-          fi
-          bash ./scripts/generate_release_manifest.sh bugox "$VERSION" stable "$ASSET_URL" "$SHA256" release-manifest.json "$PLATFORM" "$UPDATE_MODE" "$UPDATE_REQUIRED" "$MIN_SUPPORTED_VERSION" "$UPDATE_MESSAGE"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
 
-      - name: Upload manifest artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: bugox-release-manifest-${{ steps.meta.outputs.version }}
-          path: release-manifest.json
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+          event_path = Path(os.environ["GITHUB_EVENT_PATH"])
+          event = json.loads(event_path.read_text(encoding="utf-8"))
+
+          input_version = os.environ.get("INPUT_VERSION", "").strip()
+          input_asset_url = os.environ.get("INPUT_ASSET_URL", "").strip()
+          input_platform = (os.environ.get("INPUT_PLATFORM", "windows-x64") or "windows-x64").strip()
+          update_mode = (os.environ.get("INPUT_UPDATE_MODE", "optional") or "optional").strip()
+          update_required = (os.environ.get("INPUT_UPDATE_REQUIRED", "false") or "false").strip().lower() in {"1", "true", "yes"}
+          min_supported_version = os.environ.get("INPUT_MIN_SUPPORTED_VERSION", "").strip()
+          update_message = os.environ.get("INPUT_UPDATE_MESSAGE", "").strip()
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          platforms = [
+            "windows-x64",
+            "windows-arm64",
+            "linux-x64",
+            "linux-arm64",
+            "macos-x64",
+            "macos-arm64",
+          ]
+          downloads = {platform: None for platform in platforms}
+          sha256 = None
+
+          def api_json(path: str) -> dict:
+            completed = subprocess.run(
+              ["gh", "api", path],
+              check=True,
+              capture_output=True,
+              text=True,
+            )
+            return json.loads(completed.stdout)
+
+          release_obj = None
+          version = None
+
+          if event_name == "release":
+            release_obj = event.get("release") or {}
+            version = (release_obj.get("tag_name") or "").strip()
+
+          if input_version:
+            version = input_version
+
+          if release_obj is None:
+            if version:
+              release_obj = api_json(f"repos/{repo}/releases/tags/{version}")
+            else:
+              release_obj = api_json(f"repos/{repo}/releases/latest")
+              version = (release_obj.get("tag_name") or "").strip()
+
+          if not version:
+            raise SystemExit("Unable to resolve release version.")
+
+          assets = release_obj.get("assets") or []
+
+          def detect_platform(asset_name: str) -> str | None:
+            name = asset_name.lower()
+            if re.search(r"(win|windows).*(arm64|aarch64)|installer_arm64", name):
+              return "windows-arm64"
+            if re.search(r"(win|windows).*(x64|amd64)|installer_x64|win64", name):
+              return "windows-x64"
+            if re.search(r"(linux).*(arm64|aarch64)", name):
+              return "linux-arm64"
+            if re.search(r"(linux).*(x64|amd64)", name):
+              return "linux-x64"
+            if re.search(r"(mac|darwin|osx).*(arm64|aarch64)", name):
+              return "macos-arm64"
+            if re.search(r"(mac|darwin|osx).*(x64|x86_64|amd64)", name):
+              return "macos-x64"
+            return None
+
+          checksum_asset_url = None
+          for asset in assets:
+            name = str(asset.get("name") or "")
+            url = str(asset.get("browser_download_url") or "").strip()
+            if not url:
+              continue
+            if re.search(r"sha256|sha256sum|checksums?", name, re.IGNORECASE):
+              checksum_asset_url = url
+              continue
+            platform = detect_platform(name)
+            if platform and downloads[platform] is None:
+              downloads[platform] = url
+
+          if checksum_asset_url:
+            try:
+              checksum_content = subprocess.run(
+                ["curl", "-fsSL", checksum_asset_url],
+                check=True,
+                capture_output=True,
+                text=True,
+              ).stdout
+              match = re.search(r"([A-Fa-f0-9]{64})", checksum_content)
+              if match:
+                sha256 = match.group(1)
+            except subprocess.CalledProcessError:
+              pass
+
+          if input_asset_url:
+            if input_platform not in downloads:
+              raise SystemExit(f"Unsupported platform override: {input_platform}")
+            downloads[input_platform] = input_asset_url
+
+          if not any(downloads.values()):
+            raise SystemExit("No downloadable assets resolved; refusing to publish empty manifest.")
+
+          primary_url = next((url for url in downloads.values() if url), "")
+          payload = {
+            "browser": os.environ["BROWSER_SLUG"],
+            "version": version,
+            "downloads": downloads,
+            "update_policy": {
+              "mode": update_mode,
+              "required": update_required,
+            },
+            "artifact": {
+              "url": primary_url,
+              "sha256": sha256,
+            },
+          }
+          if min_supported_version:
+            payload["update_policy"]["min_supported_version"] = min_supported_version
+          if update_message:
+            payload["update_policy"]["message"] = update_message
+
+          Path("release-manifest.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+          )
+          print(f"Prepared manifest for {payload['browser']} {version}")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
 
       - name: Attach manifest to release
         if: github.event_name == 'release'
@@ -86,13 +200,27 @@ jobs:
       - name: Publish manifest to BugLogin API
         env:
           BUGLOGIN_RELEASE_API_URL: ${{ secrets.BUGLOGIN_RELEASE_API_URL }}
+          BUGLOGIN_RELEASE_BASE_URL: ${{ secrets.BUGLOGIN_RELEASE_BASE_URL }}
           BUGLOGIN_RELEASE_API_TOKEN: ${{ secrets.BUGLOGIN_RELEASE_API_TOKEN }}
+          BUGLOGIN_RELEASE_TOKEN: ${{ secrets.BUGLOGIN_RELEASE_TOKEN }}
         run: |
-          if [[ -z "${BUGLOGIN_RELEASE_API_URL}" || -z "${BUGLOGIN_RELEASE_API_TOKEN}" ]]; then
-            echo "Missing BUGLOGIN_RELEASE_API_URL or BUGLOGIN_RELEASE_API_TOKEN; skipping API publish."
-            exit 0
+          API_URL="${BUGLOGIN_RELEASE_API_URL}"
+          if [[ -z "${API_URL}" && -n "${BUGLOGIN_RELEASE_BASE_URL}" ]]; then
+            API_URL="${BUGLOGIN_RELEASE_BASE_URL%/}/v1/browser/release"
           fi
-          curl -fsSL -X POST "${BUGLOGIN_RELEASE_API_URL}" \
-            -H "Authorization: Bearer ${BUGLOGIN_RELEASE_API_TOKEN}" \
+          API_TOKEN="${BUGLOGIN_RELEASE_API_TOKEN}"
+          if [[ -z "${API_TOKEN}" && -n "${BUGLOGIN_RELEASE_TOKEN}" ]]; then
+            API_TOKEN="${BUGLOGIN_RELEASE_TOKEN}"
+          fi
+          if [[ -z "${API_URL}" ]]; then
+            echo "Missing release API URL secret (BUGLOGIN_RELEASE_API_URL or BUGLOGIN_RELEASE_BASE_URL)." >&2
+            exit 1
+          fi
+          if [[ -z "${API_TOKEN}" ]]; then
+            echo "Missing release API token secret (BUGLOGIN_RELEASE_API_TOKEN or BUGLOGIN_RELEASE_TOKEN)." >&2
+            exit 1
+          fi
+          curl -fsSL -X POST "${API_URL}" \
+            -H "Authorization: Bearer ${API_TOKEN}" \
             -H "Content-Type: application/json" \
             --data-binary @release-manifest.json

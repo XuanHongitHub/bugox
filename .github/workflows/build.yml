@@ -14,8 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Stable multi-platform lane without the known flaky macOS cross-build.
-        target: [windows, linux]
+        # Multi-platform branded release lane.
+        target: [windows, linux, macos]
         arch: [x86_64]
 
     steps:

@@ -14,14 +14,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # macOS cross-build is temporarily disabled because Firefox SDK fetch
-        # from Linux runner returns HTTP 403 (toolchain side issue).
-        target: [linux, windows]
-        arch: [x86_64, arm64, i686]
-        exclude:
-          # Fails (.mozbuild does not include clang++-cl)
-          - target: windows
-            arch: arm64
+        # Stable production lane: build the platform currently consumed by
+        # BugLogin desktop rollout first (Windows x64).
+        target: [windows]
+        arch: [x86_64]
 
     steps:
       - name: Maximize build space

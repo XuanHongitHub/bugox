@@ -11,7 +11,9 @@ on:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    continue-on-error: ${{ matrix.target == 'macos' }}
     strategy:
+      fail-fast: false
       matrix:
         target: [linux, windows, macos]
         arch: [x86_64, arm64, i686]

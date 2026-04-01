@@ -80,6 +80,7 @@ jobs:
             "macos-arm64",
           ]
           downloads = {platform: None for platform in platforms}
+          best_scores = {platform: -10_000 for platform in platforms}
           sha256 = None
 
           def api_json(path: str) -> dict:
@@ -129,6 +130,38 @@ jobs:
               return "macos-x64"
             return None
 
+          def asset_score(platform: str, asset_name: str) -> int:
+            name = asset_name.lower()
+            score = 0
+            if platform.startswith("windows"):
+              if name.endswith(".zip"):
+                score += 1000
+              if name.endswith(".exe"):
+                score += 200
+              if name.endswith(".msi"):
+                score += 150
+              if "installer" in name:
+                score -= 400
+            elif platform.startswith("linux"):
+              if name.endswith(".tar.xz"):
+                score += 1000
+              if name.endswith(".tar.gz"):
+                score += 800
+              if name.endswith(".zip"):
+                score += 600
+              if "appimage" in name:
+                score += 500
+            elif platform.startswith("macos"):
+              if name.endswith(".dmg"):
+                score += 1000
+              if name.endswith(".zip"):
+                score += 800
+              if name.endswith(".tar.gz"):
+                score += 700
+            if "portable" in name or "standalone" in name:
+              score += 50
+            return score
+
           checksum_asset_url = None
           for asset in assets:
             name = str(asset.get("name") or "")
@@ -139,8 +172,11 @@ jobs:
               checksum_asset_url = url
               continue
             platform = detect_platform(name)
-            if platform and downloads[platform] is None:
-              downloads[platform] = url
+            if platform:
+              score = asset_score(platform, name)
+              if score > best_scores[platform]:
+                best_scores[platform] = score
+                downloads[platform] = url
 
           if checksum_asset_url:
             try:

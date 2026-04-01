@@ -1,0 +1,153 @@
+name: Build macOS (Optional)
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Optional release tag to attach successful macOS artifacts."
+        required: false
+        type: string
+  schedule:
+    - cron: "37 3 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  build-macos:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, arm64]
+
+    steps:
+      - name: Maximize build space
+        uses: AdityaGarg8/remove-unwanted-software@v4.1
+        with:
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+          remove-docker-images: "true"
+          remove-cached-tools: "true"
+          remove-swapfile: "true"
+          verbose: "false"
+
+      - name: Remove unwanted tools
+        run: |
+          sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
+          sudo apt-get remove -y '^dotnet-.*' > /dev/null
+          sudo apt-get remove -y '^llvm-.*' > /dev/null
+          sudo apt-get remove -y 'php.*' > /dev/null
+          sudo apt-get remove -y '^mongodb-.*' > /dev/null
+          sudo apt-get remove -y '^mysql-.*' > /dev/null
+          sudo apt-get remove -y azure-cli google-chrome-stable firefox ${POWERSHELL} mono-devel libgl1-mesa-dri --fix-missing > /dev/null
+          if [[ (${CODENAME} = focal) || (${CODENAME} = jammy) ]]; then
+            sudo apt-get remove -y google-cloud-sdk --fix-missing > /dev/null
+            sudo apt-get remove -y google-cloud-cli --fix-missing > /dev/null
+          fi
+          sudo apt-get autoremove -y > /dev/null
+          sudo apt-get clean > /dev/null
+
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.23"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up LLVM
+        run: |
+          wget https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 18
+          sudo apt-get install -y lld-18 clang-18
+          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y msitools p7zip-full aria2 unzip
+
+      - name: Fetch source
+        env:
+          CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
+        run: make fetch
+
+      - name: Setup and bootstrap
+        run: |
+          make setup-minimal
+          make mozbootstrap
+          mkdir -p dist
+
+      - name: Prepare custom macOS SDK (optional mirror)
+        env:
+          BUGLOGIN_MACOS_SDK_URL: ${{ secrets.BUGLOGIN_MACOS_SDK_URL }}
+          BUGLOGIN_MACOS_SDK_SHA256: ${{ secrets.BUGLOGIN_MACOS_SDK_SHA256 }}
+          BUGLOGIN_MACOS_SDK_AUTH_HEADER: ${{ secrets.BUGLOGIN_MACOS_SDK_AUTH_HEADER }}
+        run: bash ./scripts/prepare-macos-sdk.sh
+
+      - name: Create swap space
+        run: |
+          sudo fallocate -l 16G /swapfile
+          sudo chmod 600 /swapfile
+          sudo mkswap /swapfile
+          sudo swapon /swapfile
+          free -h
+
+      - name: Build macOS
+        env:
+          BUGOX_MACOS_SDK_PATH: ${{ env.BUGOX_MACOS_SDK_PATH }}
+        run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: BugoxBuilds-macos-${{ matrix.arch }}
+          path: dist/*
+
+  release-macos-assets:
+    needs: build-macos
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != ''
+    steps:
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: BugoxBuilds-macos-*
+          merge-multiple: true
+
+      - name: Skip when no artifacts are available
+        id: check
+        run: |
+          count=$(find artifacts -type f | wc -l | tr -d ' ')
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          if [[ "${count}" == "0" ]]; then
+            echo "No macOS artifacts produced; skipping release upload."
+          fi
+
+      - name: Attach macOS artifacts to release
+        if: steps.check.outputs.count != '0'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag }}
+          files: artifacts/**/*
+
+      - name: Refresh release manifest after macOS upload
+        if: steps.check.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run release-manifest.yml --ref "${GITHUB_REF_NAME}" -f version="${{ github.event.inputs.release_tag }}"

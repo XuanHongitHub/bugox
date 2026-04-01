@@ -45,5 +45,7 @@ jobs:
         if: steps.existing.outputs.exists == 'false'
         run: |
           TAG="${{ steps.latest.outputs.tag }}"
-          echo "Triggering build.yml for branded Bugox release ${TAG} (mirror disabled)."
+          echo "Triggering build.yml for branded Bugox release ${TAG}."
           gh workflow run build.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}"
+          echo "Triggering optional macOS follow-up build for ${TAG}."
+          gh workflow run build-macos-optional.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}" || true

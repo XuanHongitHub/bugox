@@ -16,5 +16,16 @@ ac_add_options --disable-update-agent
 # export HOST_CC="$CROSS/clang/bin/clang"
 # export HOST_CXX="$CROSS/cla   ng/bin/clang++"
 
-# Only temporary
-# ac_add_options --with-macos-sdk="$MOZBUILD/MacOSX14.4.sdk"
+if test -z "$MOZBUILD"; then
+  MOZBUILD="$HOME/.mozbuild"
+fi
+
+if test -n "$BUGOX_MACOS_SDK_PATH"; then
+  ac_add_options --with-macos-sdk="$BUGOX_MACOS_SDK_PATH"
+elif test -d "$MOZBUILD/MacOSX14.4.sdk"; then
+  ac_add_options --with-macos-sdk="$MOZBUILD/MacOSX14.4.sdk"
+elif test -d "$MOZBUILD/MacOSX15.0.sdk"; then
+  ac_add_options --with-macos-sdk="$MOZBUILD/MacOSX15.0.sdk"
+elif test -d "$MOZBUILD/MacOSX.sdk"; then
+  ac_add_options --with-macos-sdk="$MOZBUILD/MacOSX.sdk"
+fi

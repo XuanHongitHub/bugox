@@ -72,31 +72,26 @@ jobs:
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Skip when already released in fork
+      - name: Compute fork tag
+        id: fork
+        run: |
+          echo "tag=${{ steps.latest.outputs.tag }}-buglogin.1" >> "$GITHUB_OUTPUT"
+
+      - name: Skip when fork release already exists
         id: existing
         run: |
-          TAG="${{ steps.latest.outputs.tag }}"
+          TAG="${{ steps.fork.outputs.tag }}"
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Release ${TAG} already exists in fork."
+            echo "Fork release ${TAG} already exists."
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Mirror upstream release assets
+      - name: Trigger customize-release workflow
         if: steps.existing.outputs.exists == 'false'
         run: |
-          TAG="${{ steps.latest.outputs.tag }}"
-          mkdir -p upstream-assets
-          gh release download "${TAG}" --repo "${UPSTREAM_REPO}" --dir upstream-assets
-          if [[ -z "$(ls -A upstream-assets)" ]]; then
-            echo "Upstream release ${TAG} has no assets; refusing to create empty release." >&2
-            exit 1
-          fi
-          gh release create "${TAG}" --title "${TAG}" --generate-notes
-          gh release upload "${TAG}" upstream-assets/*
-
-      - name: Trigger manifest publish
-        if: steps.existing.outputs.exists == 'false'
-        run: |
-          gh workflow run release-manifest.yml --ref "${GITHUB_REF_NAME}" -f version="${{ steps.latest.outputs.tag }}"
+          gh workflow run customize-release.yml \
+            --ref "${GITHUB_REF_NAME}" \
+            -f upstream_tag="${{ steps.latest.outputs.tag }}" \
+            -f fork_tag="${{ steps.fork.outputs.tag }}"

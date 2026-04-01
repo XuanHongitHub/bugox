@@ -23,7 +23,49 @@ jobs:
       - name: Resolve latest upstream release
         id: latest
         run: |
-          TAG="$(gh api repos/${UPSTREAM_REPO}/releases/latest --jq '.tag_name')"
+          TAG="$(python3 - <<'PY'
+import json
+import re
+import subprocess
+import sys
+
+repo = "daijro/camoufox"
+raw = subprocess.check_output(
+    ["gh", "api", f"repos/{repo}/releases?per_page=30"],
+    text=True,
+)
+releases = json.loads(raw)
+
+def detect_os(asset_name: str) -> set[str]:
+    name = asset_name.lower()
+    found = set()
+    if re.search(r"(win|windows)|installer_x64|installer_arm64|win64|win[._-]?(x64|x86_64|arm64|aarch64)", name):
+        found.add("windows")
+    if re.search(r"(linux|lin)", name):
+        found.add("linux")
+    if re.search(r"(mac|darwin|osx)", name):
+        found.add("macos")
+    return found
+
+selected = None
+for rel in releases:
+    if rel.get("prerelease"):
+        continue
+    assets = rel.get("assets") or []
+    oses = set()
+    for a in assets:
+        oses |= detect_os((a or {}).get("name", ""))
+    if {"windows", "linux", "macos"}.issubset(oses):
+        selected = (rel.get("tag_name") or "").strip()
+        if selected:
+            break
+
+if not selected:
+    sys.exit("No non-prerelease upstream release with Windows+Linux+macOS assets found.")
+
+print(selected)
+PY
+)"
           if [[ -z "${TAG}" ]]; then
             echo "Failed to resolve latest upstream release tag." >&2
             exit 1
@@ -41,11 +83,20 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger branded fork build/release
+      - name: Mirror upstream release assets
         if: steps.existing.outputs.exists == 'false'
         run: |
           TAG="${{ steps.latest.outputs.tag }}"
-          echo "Triggering build.yml for branded Bugox release ${TAG}."
-          gh workflow run build.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}"
-          echo "Triggering optional macOS follow-up build for ${TAG}."
-          gh workflow run build-macos-optional.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}" || true
+          mkdir -p upstream-assets
+          gh release download "${TAG}" --repo "${UPSTREAM_REPO}" --dir upstream-assets
+          if [[ -z "$(ls -A upstream-assets)" ]]; then
+            echo "Upstream release ${TAG} has no assets; refusing to create empty release." >&2
+            exit 1
+          fi
+          gh release create "${TAG}" --title "${TAG}" --generate-notes
+          gh release upload "${TAG}" upstream-assets/*
+
+      - name: Trigger manifest publish
+        if: steps.existing.outputs.exists == 'false'
+        run: |
+          gh workflow run release-manifest.yml --ref "${GITHUB_REF_NAME}" -f version="${{ steps.latest.outputs.tag }}"

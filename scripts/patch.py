@@ -41,6 +41,32 @@ class Patcher:
     moz_target: str
     target: str
 
+    @staticmethod
+    def _has_unpatched_tag() -> bool:
+        """
+        Check whether current source directory is a git repo with `unpatched` tag.
+        Running git clean/reset without this guard can wipe extracted source trees
+        when no baseline commit/tag was prepared.
+        """
+        in_git = subprocess.run(
+            ['git', 'rev-parse', '--is-inside-work-tree'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+        ).returncode == 0
+        if not in_git:
+            return False
+
+        has_unpatched_tag = subprocess.run(
+            ['git', 'show-ref', '--verify', '--quiet', 'refs/tags/unpatched'],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            text=True,
+        ).returncode == 0
+        return has_unpatched_tag
+
     def camoufox_patches(self):
         """
         Apply all patches
@@ -48,8 +74,11 @@ class Patcher:
         version, release = extract_args()
         with temp_cd(find_src_dir('.', version, release)):
             # Reset to unpatched state first (like "Find broken patches")
-            print("Resetting to unpatched state...")
-            run('git clean -fdx && ./mach clobber && git reset --hard unpatched', exit_on_fail=False)
+            if self._has_unpatched_tag():
+                print("Resetting to unpatched state...")
+                run('git clean -fdx && ./mach clobber && git reset --hard unpatched', exit_on_fail=False)
+            else:
+                print("Skipping reset: no git `unpatched` tag found in source tree.")
 
             # Re-copy additions and settings after reset
             print("Re-copying additions and settings...")

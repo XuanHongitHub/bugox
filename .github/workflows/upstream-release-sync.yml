@@ -24,48 +24,48 @@ jobs:
         id: latest
         run: |
           TAG="$(python3 - <<'PY'
-import json
-import re
-import subprocess
-import sys
+          import json
+          import re
+          import subprocess
+          import sys
 
-repo = "daijro/camoufox"
-raw = subprocess.check_output(
-    ["gh", "api", f"repos/{repo}/releases?per_page=30"],
-    text=True,
-)
-releases = json.loads(raw)
+          repo = "daijro/camoufox"
+          raw = subprocess.check_output(
+              ["gh", "api", f"repos/{repo}/releases?per_page=30"],
+              text=True,
+          )
+          releases = json.loads(raw)
 
-def detect_os(asset_name: str) -> set[str]:
-    name = asset_name.lower()
-    found = set()
-    if re.search(r"(win|windows)|installer_x64|installer_arm64|win64|win[._-]?(x64|x86_64|arm64|aarch64)", name):
-        found.add("windows")
-    if re.search(r"(linux|lin)", name):
-        found.add("linux")
-    if re.search(r"(mac|darwin|osx)", name):
-        found.add("macos")
-    return found
+          def detect_os(asset_name: str) -> set[str]:
+              name = asset_name.lower()
+              found = set()
+              if re.search(r"(win|windows)|installer_x64|installer_arm64|win64|win[._-]?(x64|x86_64|arm64|aarch64)", name):
+                  found.add("windows")
+              if re.search(r"(linux|lin)", name):
+                  found.add("linux")
+              if re.search(r"(mac|darwin|osx)", name):
+                  found.add("macos")
+              return found
 
-selected = None
-for rel in releases:
-    if rel.get("prerelease"):
-        continue
-    assets = rel.get("assets") or []
-    oses = set()
-    for a in assets:
-        oses |= detect_os((a or {}).get("name", ""))
-    if {"windows", "linux", "macos"}.issubset(oses):
-        selected = (rel.get("tag_name") or "").strip()
-        if selected:
-            break
+          selected = None
+          for rel in releases:
+              if rel.get("prerelease"):
+                  continue
+              assets = rel.get("assets") or []
+              oses = set()
+              for a in assets:
+                  oses |= detect_os((a or {}).get("name", ""))
+              if {"windows", "linux", "macos"}.issubset(oses):
+                  selected = (rel.get("tag_name") or "").strip()
+                  if selected:
+                      break
 
-if not selected:
-    sys.exit("No non-prerelease upstream release with Windows+Linux+macOS assets found.")
+          if not selected:
+              sys.exit("No non-prerelease upstream release with Windows+Linux+macOS assets found.")
 
-print(selected)
-PY
-)"
+          print(selected)
+          PY
+          )"
           if [[ -z "${TAG}" ]]; then
             echo "Failed to resolve latest upstream release tag." >&2
             exit 1

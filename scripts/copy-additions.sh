@@ -41,9 +41,14 @@ run 'touch moz.build'
 popd > /dev/null
 
 # Generate Assets.car for macOS builds (if on macOS) or ensure it exists
-if [[ ! -f ../additions/browser/branding/camoufox/Assets.car ]]; then
+if [[ ! -f ../additions/browser/branding/bugox/Assets.car && ! -f ../additions/browser/branding/camoufox/Assets.car ]]; then
     echo "Generating Assets.car..."
     bash ../scripts/generate-assets-car.sh
+fi
+
+# Ensure Bugox branding has Assets.car during transition from Camoufox naming.
+if [[ ! -f ../additions/browser/branding/bugox/Assets.car && -f ../additions/browser/branding/camoufox/Assets.car ]]; then
+    cp -v ../additions/browser/branding/camoufox/Assets.car ../additions/browser/branding/bugox/Assets.car
 fi
 
 # Copy ALL new files/folders from ../additions to .

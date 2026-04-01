@@ -41,20 +41,9 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Mirror upstream release assets
+      - name: Trigger branded fork build/release
         if: steps.existing.outputs.exists == 'false'
         run: |
           TAG="${{ steps.latest.outputs.tag }}"
-          mkdir -p upstream-assets
-          gh release download "${TAG}" --repo "${UPSTREAM_REPO}" --dir upstream-assets
-          if [[ -z "$(ls -A upstream-assets)" ]]; then
-            echo "Upstream release ${TAG} has no assets; refusing to create empty release." >&2
-            exit 1
-          fi
-          gh release create "${TAG}" --title "${TAG}" --generate-notes
-          gh release upload "${TAG}" upstream-assets/*
-
-      - name: Trigger manifest publish
-        if: steps.existing.outputs.exists == 'false'
-        run: |
-          gh workflow run release-manifest.yml --ref "${GITHUB_REF_NAME}" -f version="${{ steps.latest.outputs.tag }}"
+          echo "Triggering build.yml for branded Bugox release ${TAG} (mirror disabled)."
+          gh workflow run build.yml --ref "${GITHUB_REF_NAME}" -f release_tag="${TAG}"

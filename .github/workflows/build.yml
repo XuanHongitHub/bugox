@@ -2,6 +2,11 @@ name: Build and Release
 
 on:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish (e.g. v135.0.1-beta.24). Leave empty to build-only."
+        required: false
+        type: string
 
 jobs:
   build:
@@ -115,6 +120,9 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
+    if: >
+      startsWith(github.ref, 'refs/tags/') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
 
     steps:
       - name: Download all artifacts
@@ -124,11 +132,12 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
         with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: artifacts/**/*
           generate_release_notes: true
-          draft: true
+          draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

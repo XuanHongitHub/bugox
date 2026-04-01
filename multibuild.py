@@ -93,8 +93,14 @@ class BSYS:
     @property
     def assets(self) -> List[str]:
         """Get the list of assets"""
-        package_pattern = f'camoufox-*-{self.target[:3]}.{self.arch}.zip'
-        return glob.glob(package_pattern)
+        patterns = [
+            f'bugox-*-{self.target[:3]}.{self.arch}.zip',
+            f'camoufox-*-{self.target[:3]}.{self.arch}.zip',
+        ]
+        assets: List[str] = []
+        for pattern in patterns:
+            assets.extend(glob.glob(pattern))
+        return sorted(set(assets))
 
     @staticmethod
     def clean():

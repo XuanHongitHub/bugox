@@ -31,23 +31,37 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
             )
 
         if target == 'macos':
-            # Move Camoufox/Camoufox.app -> Camoufox.app
-            nightly_dir = os.path.join(temp_dir, 'Camoufox')
-            shutil.move(
-                os.path.join(nightly_dir, 'Camoufox.app'), os.path.join(temp_dir, 'Camoufox.app')
-            )
+            # Move <Brand>/<Brand>.app -> <Brand>.app (supports bugox/camoufox migration)
+            mac_app_candidates = [
+                ('Bugox', 'Bugox.app'),
+                ('Camoufox', 'Camoufox.app'),
+            ]
+            selected = None
+            for dir_name, app_name in mac_app_candidates:
+                nightly_dir = os.path.join(temp_dir, dir_name)
+                app_path = os.path.join(nightly_dir, app_name)
+                if os.path.exists(app_path):
+                    selected = (nightly_dir, app_name)
+                    break
+
+            if selected is None:
+                raise FileNotFoundError('No Bugox/Camoufox macOS app bundle found in package')
+
+            nightly_dir, app_name = selected
+            shutil.move(os.path.join(nightly_dir, app_name), os.path.join(temp_dir, app_name))
             # Remove old app dir and all content in it
             shutil.rmtree(nightly_dir)
         else:
-            # Move contents out of camoufox folder if it exists
-            old_camoufox_dir = os.path.join(temp_dir, 'camoufox')
-            camoufox_dir = os.path.join(temp_dir, 'camoufox-folder')
-            if os.path.exists(old_camoufox_dir):
-                # Rename camoufox_dir
-                os.rename(old_camoufox_dir, camoufox_dir)
-                for item in os.listdir(camoufox_dir):
-                    shutil.move(os.path.join(camoufox_dir, item), temp_dir)
-                os.rmdir(camoufox_dir)
+            # Move contents out of browser folder if it exists (bugox/camoufox)
+            for old_name in ('bugox', 'camoufox'):
+                old_browser_dir = os.path.join(temp_dir, old_name)
+                staged_dir = os.path.join(temp_dir, f'{old_name}-folder')
+                if os.path.exists(old_browser_dir):
+                    os.rename(old_browser_dir, staged_dir)
+                    for item in os.listdir(staged_dir):
+                        shutil.move(os.path.join(staged_dir, item), temp_dir)
+                    os.rmdir(staged_dir)
+                    break
 
         # Create target_dir
         if target == 'macos':
@@ -128,33 +142,51 @@ def main():
         # Create package files
         run('./mach package')
         # Find package files
-        search_path = os.path.abspath(
-            f'obj-{moz_target}/dist/camoufox-{args.version}-{args.release}.*.{file_ext}'
-        )
+        search_patterns = [
+            os.path.abspath(f'obj-{moz_target}/dist/bugox-{args.version}-{args.release}.*.{file_ext}'),
+            os.path.abspath(f'obj-{moz_target}/dist/camoufox-{args.version}-{args.release}.*.{file_ext}'),
+        ]
 
     # Copy package files
-    for file in glob.glob(search_path):
-        if 'xpt_artifacts' in file:
-            print(f'Skipping xpt artifacts: {file}')
-            continue
-        print(f'Found package: {file}')
-        # Copy to root
-        shutil.copy2(file, '.')
-        break
-    else:
-        print(f"Error: No package file found matching pattern: {search_path}")
+    found_package = None
+    for search_path in search_patterns:
+        for file in glob.glob(search_path):
+            if 'xpt_artifacts' in file:
+                print(f'Skipping xpt artifacts: {file}')
+                continue
+            print(f'Found package: {file}')
+            shutil.copy2(file, '.')
+            found_package = file
+            break
+        if found_package:
+            break
+    if not found_package:
+        print(
+            "Error: No package file found matching patterns: "
+            + ", ".join(search_patterns)
+        )
         sys.exit(1)
 
     # Find the package file
-    package_pattern = f'camoufox-{args.version}-{args.release}.en-US.*.{file_ext}'
-    package_files = glob.glob(package_pattern)
+    package_patterns = [
+        f'bugox-{args.version}-{args.release}.en-US.*.{file_ext}',
+        f'camoufox-{args.version}-{args.release}.en-US.*.{file_ext}',
+    ]
+    package_files = []
+    for package_pattern in package_patterns:
+        package_files = glob.glob(package_pattern)
+        if package_files:
+            break
     if not package_files:
-        print(f"Error: No package file found matching pattern: {package_pattern}")
+        print(
+            "Error: No package file found matching patterns: "
+            + ", ".join(package_patterns)
+        )
         exit(1)
     package_file = package_files[0]
 
     # Add includes to the package
-    new_name = f'camoufox-{args.version}-{args.release}-{args.os[:3]}.{args.arch}.zip'
+    new_name = f'bugox-{args.version}-{args.release}-{args.os[:3]}.{args.arch}.zip'
     add_includes_to_package(
         package_file=package_file,
         includes=args.includes,

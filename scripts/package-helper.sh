@@ -5,7 +5,10 @@ add_includes_to_package() {
     echo "Adding includes to package: $1"
     temp_dir=$(mktemp -d)
     7z x "$1" "-o$temp_dir"
-    if [ -d "$temp_dir/camoufox" ]; then
+    if [ -d "$temp_dir/bugox" ]; then
+        mv "$temp_dir/bugox"/* "$temp_dir/"
+        rmdir "$temp_dir/bugox"
+    elif [ -d "$temp_dir/camoufox" ]; then
         mv "$temp_dir/camoufox"/* "$temp_dir/"
         rmdir "$temp_dir/camoufox"
     fi

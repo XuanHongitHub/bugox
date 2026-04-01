@@ -1,4 +1,4 @@
-name: Upstream Release Sync
+name: Upstream Release Sync (Branded Build)
 
 on:
   workflow_dispatch:
@@ -88,10 +88,9 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Trigger customize-release workflow
+      - name: Trigger branded source build workflow
         if: steps.existing.outputs.exists == 'false'
         run: |
-          gh workflow run customize-release.yml \
+          gh workflow run build.yml \
             --ref "${GITHUB_REF_NAME}" \
-            -f upstream_tag="${{ steps.latest.outputs.tag }}" \
-            -f fork_tag="${{ steps.fork.outputs.tag }}"
+            -f release_tag="${{ steps.fork.outputs.tag }}"

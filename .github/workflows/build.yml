@@ -14,9 +14,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Stable production lane: build the platform currently consumed by
-        # BugLogin desktop rollout first (Windows x64).
-        target: [windows]
+        # Stable multi-platform lane without the known flaky macOS cross-build.
+        target: [windows, linux]
         arch: [x86_64]
 
     steps:

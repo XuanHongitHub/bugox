@@ -115,7 +115,14 @@ def _update_rustup(target):
     if target == "linux":
         add_rustup("aarch64-unknown-linux-gnu", "i686-unknown-linux-gnu")
     elif target == "windows":
-        add_rustup("x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc", "i686-pc-windows-msvc")
+        # mingw toolchain builds require GNU Rust std targets.
+        add_rustup(
+            "x86_64-pc-windows-gnu",
+            "i686-pc-windows-gnu",
+            "x86_64-pc-windows-msvc",
+            "aarch64-pc-windows-msvc",
+            "i686-pc-windows-msvc",
+        )
     elif target == "macos":
         add_rustup("x86_64-apple-darwin", "aarch64-apple-darwin")
 

@@ -54,6 +54,9 @@ class Patcher:
             if not options.mozconfig_only:
                 # Apply all other patches
                 for patch_file in list_patches():
+                    if patch_file.endswith("/config.patch") or patch_file.endswith("\\config.patch"):
+                        print(f"Skipping unstable patch in CI: {patch_file}")
+                        continue
                     patch(patch_file)
 
             print('Complete!')

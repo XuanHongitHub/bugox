@@ -17,7 +17,6 @@ permissions:
 jobs:
   build-macos:
     runs-on: ubuntu-24.04
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -97,7 +96,19 @@ jobs:
           BUGLOGIN_MACOS_SDK_AUTH_HEADER: ${{ secrets.BUGLOGIN_MACOS_SDK_AUTH_HEADER }}
         run: bash ./scripts/prepare-macos-sdk.sh
 
+      - name: Check SDK availability
+        id: sdk
+        run: |
+          if [[ -n "${BUGOX_MACOS_SDK_PATH}" && -d "${BUGOX_MACOS_SDK_PATH}" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+            echo "Using SDK path: ${BUGOX_MACOS_SDK_PATH}"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "macOS SDK not available. Skipping optional macOS build."
+          fi
+
       - name: Create swap space
+        if: steps.sdk.outputs.available == 'true'
         run: |
           sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
@@ -106,12 +117,13 @@ jobs:
           free -h
 
       - name: Build macOS
+        if: steps.sdk.outputs.available == 'true'
         env:
           BUGOX_MACOS_SDK_PATH: ${{ env.BUGOX_MACOS_SDK_PATH }}
         run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
 
       - name: Upload artifacts
-        if: always()
+        if: always() && steps.sdk.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: BugoxBuilds-macos-${{ matrix.arch }}

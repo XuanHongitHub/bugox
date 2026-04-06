@@ -64,7 +64,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y msitools p7zip-full aria2
+          sudo apt-get install -y msitools p7zip-full aria2 g++-mingw-w64-x86-64
 
       - name: Fetch source
         env:
@@ -115,7 +115,11 @@ jobs:
       - name: Install dependencies (macOS)
         run: |
           brew update
-          brew install aria2 p7zip
+          brew install aria2 p7zip llvm
+
+      - name: Expose LLVM linker (macOS)
+        run: |
+          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
 
       - name: Fetch source
         env:

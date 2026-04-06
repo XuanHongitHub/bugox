@@ -6,6 +6,10 @@ on:
     tags:
       - "*"
 
+concurrency:
+  group: bugox-build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -14,10 +18,8 @@ jobs:
         target: [linux, windows, macos]
         arch: [x86_64, arm64, i686]
         exclude:
-          # Fails (.mozbuild does not include clang++-cl)
           - target: windows
             arch: arm64
-          # Unsuported
           - target: macos
             arch: i686
 
@@ -35,7 +37,6 @@ jobs:
           verbose: "false"
 
       - name: Remove unwanted tools
-        # Originally from here: https://github.com/AdityaGarg8/remove-unwanted-software/blob/master/action.yml
         run: |
           sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
           sudo apt-get remove -y '^dotnet-.*' > /dev/null
@@ -51,17 +52,17 @@ jobs:
           sudo apt-get autoremove -y > /dev/null
           sudo apt-get clean > /dev/null
 
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 1
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v6
         with:
           go-version: "1.23"
 
       - name: Set up Python
-        uses: actions/setup-python@v2
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -87,13 +88,12 @@ jobs:
       - name: Fetch source
         env:
           CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
-        run: |
-          make fetch
+        run: make fetch
 
-      - name: Setup and bootstrap
+      - name: Setup (CI mode)
         run: |
           make setup-minimal
-          make mozbootstrap
+          rustup target add x86_64-unknown-linux-gnu i686-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-msvc i686-pc-windows-msvc x86_64-apple-darwin aarch64-apple-darwin
           mkdir -p dist
 
       - name: Create swap space
@@ -110,7 +110,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: CamoufoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
+          name: BugoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
           path: dist/*
 
   release:
@@ -131,7 +131,7 @@ jobs:
         with:
           files: artifacts/**/*
           generate_release_notes: true
-          draft: true
+          draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

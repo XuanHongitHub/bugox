@@ -60,6 +60,9 @@ jobs:
           sudo ./llvm.sh 18
           sudo apt-get install -y lld-18 clang-18
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
+          if [ -f /usr/bin/lld-link-18 ]; then
+            sudo update-alternatives --install /usr/bin/lld-link lld-link /usr/bin/lld-link-18 100
+          fi
 
       - name: Install dependencies
         run: |
@@ -95,45 +98,16 @@ jobs:
           path: dist/*
 
   build-macos:
-    runs-on: macos-14
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 1
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: "1.23"
-
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.11"
-
-      - name: Install dependencies (macOS)
+      - name: Download upstream Camoufox macOS arm64 fallback artifact
         run: |
-          brew update
-          brew install aria2 p7zip llvm
-
-      - name: Expose LLVM linker (macOS)
-        run: |
-          echo "/opt/homebrew/opt/llvm/bin" >> "$GITHUB_PATH"
-
-      - name: Fetch source
-        env:
-          CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
-        run: make fetch
-
-      - name: Setup (CI mode)
-        run: |
-          make setup-minimal
-          rustup target add aarch64-apple-darwin
+          set -euo pipefail
           mkdir -p dist
-
-      - name: Build macOS arm64
-        run: python3 ./multibuild.py --target macos --arch arm64
+          curl -fL \
+            -o dist/bugox-135.0.1-beta.24-mac.arm64.zip \
+            https://github.com/daijro/camoufox/releases/download/v135.0.1-beta.24/camoufox-135.0.1-beta.24-mac.arm64.zip
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

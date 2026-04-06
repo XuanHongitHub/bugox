@@ -11,7 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
+  build-linux-windows:
     runs-on: ubuntu-24.04
     strategy:
       matrix:
@@ -75,9 +75,6 @@ jobs:
           fi
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
-      - name: Check disk space
-        run: df -h
-
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -111,8 +108,58 @@ jobs:
           name: BugoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
           path: dist/*
 
+  build-macos:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-14
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.23"
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (macOS)
+        run: |
+          brew update
+          brew install aria2 p7zip
+
+      - name: Fetch source
+        env:
+          CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
+        run: make fetch
+
+      - name: Setup (CI mode)
+        run: |
+          make setup-minimal
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          mkdir -p dist
+
+      - name: Build macOS
+        run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: BugoxBuilds-macos-${{ matrix.arch }}
+          path: dist/*
+
   release:
-    needs: build
+    needs: [build-linux-windows, build-macos]
     permissions:
       contents: write
     runs-on: ubuntu-latest

@@ -81,8 +81,11 @@ class Patcher:
         with open(mozconfig_backup, 'r', encoding='utf-8') as f:
             content = f.read()
 
-        # Add target option
-        content += f"\nac_add_options --target={self.moz_target}\n"
+        # Add target option.
+        # For native macOS builds on GitHub macOS runners, forcing --target triggers cross-linker probing
+        # and fails with "Failed to find an adequate linker". Build natively instead.
+        if self.target != "macos":
+            content += f"\nac_add_options --target={self.moz_target}\n"
 
         # Add target-specific mozconfig if it exists
         target_mozconfig = os.path.join("..", "assets", f"{self.target}.mozconfig")

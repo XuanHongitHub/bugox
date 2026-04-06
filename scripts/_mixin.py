@@ -58,7 +58,8 @@ def get_moz_target(target, arch):
     if target == "linux":
         return "aarch64-unknown-linux-gnu" if arch == "arm64" else f"{arch}-pc-linux-gnu"
     if target == "windows":
-        return f"{arch}-pc-mingw32"
+        # Use mingw-w64 triple so clang can resolve the installed mingw-w64 C++ headers/libs in CI.
+        return f"{arch}-w64-mingw32"
     if target == "macos":
         return "aarch64-apple-darwin" if arch == "arm64" else f"{arch}-apple-darwin"
     raise ValueError(f"Unsupported target: {target}")

@@ -16,6 +16,7 @@ permissions:
 
 jobs:
   build-macos:
+    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:

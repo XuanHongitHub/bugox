@@ -1,17 +1,10 @@
-name: Build and Release (Required Lanes)
+name: Build and Release
 
 on:
   workflow_dispatch:
-    inputs:
-      release_tag:
-        description: "Release tag to publish (e.g. v135.0.1-beta.24). Leave empty to build-only."
-        required: false
-        type: string
-      include_linux:
-        description: "Also build linux artifact (optional lane)."
-        required: false
-        default: false
-        type: boolean
+  push:
+    tags:
+      - "*"
 
 concurrency:
   group: bugox-build-${{ github.ref }}
@@ -20,21 +13,18 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
-    continue-on-error: ${{ matrix.required == false }}
     strategy:
-      fail-fast: false
       matrix:
-        include:
+        target: [linux, windows, macos]
+        arch: [x86_64, arm64, i686]
+        exclude:
           - target: windows
-            arch: x86_64
-            required: true
-          - target: linux
-            arch: x86_64
-            required: false
+            arch: arm64
+          - target: macos
+            arch: i686
 
     steps:
       - name: Maximize build space
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: AdityaGarg8/remove-unwanted-software@v4.1
         with:
           remove-dotnet: "true"
@@ -47,8 +37,6 @@ jobs:
           verbose: "false"
 
       - name: Remove unwanted tools
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
-        # Originally from here: https://github.com/AdityaGarg8/remove-unwanted-software/blob/master/action.yml
         run: |
           sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
           sudo apt-get remove -y '^dotnet-.*' > /dev/null
@@ -65,24 +53,20 @@ jobs:
           sudo apt-get clean > /dev/null
 
       - uses: actions/checkout@v6
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         with:
           fetch-depth: 1
 
       - name: Set up Go
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: actions/setup-go@v6
         with:
           go-version: "1.23"
 
       - name: Set up Python
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Set up LLVM
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -94,31 +78,25 @@ jobs:
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
       - name: Check disk space
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: df -h
 
       - name: Install dependencies
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y msitools p7zip-full aria2
 
       - name: Fetch source
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         env:
           CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
-        run: |
-          make fetch
+        run: make fetch
 
       - name: Setup and bootstrap
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           make setup-minimal
           make mozbootstrap
           mkdir -p dist
 
       - name: Create swap space
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
@@ -127,11 +105,9 @@ jobs:
           free -h
 
       - name: Build
-        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
 
       - name: Upload artifacts
-        if: always() && (matrix.target != 'linux' || github.event.inputs.include_linux == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: BugoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
@@ -142,9 +118,6 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-latest
-    if: >
-      startsWith(github.ref, 'refs/tags/') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.release_tag != '')
 
     steps:
       - name: Download all artifacts
@@ -154,9 +127,8 @@ jobs:
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/')
         with:
-          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
-          name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: artifacts/**/*
           generate_release_notes: true
           draft: false

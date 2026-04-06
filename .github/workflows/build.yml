@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Maximize build space
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: AdityaGarg8/remove-unwanted-software@v4.1
         with:
           remove-dotnet: "true"
@@ -47,7 +47,7 @@ jobs:
           verbose: "false"
 
       - name: Remove unwanted tools
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         # Originally from here: https://github.com/AdityaGarg8/remove-unwanted-software/blob/master/action.yml
         run: |
           sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
@@ -65,24 +65,24 @@ jobs:
           sudo apt-get clean > /dev/null
 
       - uses: actions/checkout@v6
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         with:
           fetch-depth: 1
 
       - name: Set up Go
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: actions/setup-go@v6
         with:
           go-version: "1.23"
 
       - name: Set up Python
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
       - name: Set up LLVM
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           wget https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
@@ -94,31 +94,31 @@ jobs:
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
       - name: Check disk space
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: df -h
 
       - name: Install dependencies
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           sudo apt-get update
           sudo apt-get install -y msitools p7zip-full aria2
 
       - name: Fetch source
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         env:
           CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
         run: |
           make fetch
 
       - name: Setup and bootstrap
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           make setup-minimal
           make mozbootstrap
           mkdir -p dist
 
       - name: Create swap space
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: |
           sudo fallocate -l 16G /swapfile
           sudo chmod 600 /swapfile
@@ -127,11 +127,11 @@ jobs:
           free -h
 
       - name: Build
-        if: matrix.target != "linux" || github.event.inputs.include_linux == "true"
+        if: matrix.target != 'linux' || github.event.inputs.include_linux == 'true'
         run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
 
       - name: Upload artifacts
-        if: always() && (matrix.target != "linux" || github.event.inputs.include_linux == "true")
+        if: always() && (matrix.target != 'linux' || github.event.inputs.include_linux == 'true')
         uses: actions/upload-artifact@v4
         with:
           name: BugoxBuilds-${{ matrix.target }}-${{ matrix.arch }}

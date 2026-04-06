@@ -16,7 +16,6 @@ permissions:
 
 jobs:
   build-macos:
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -52,17 +51,24 @@ jobs:
           CAMOUFOX_PASSWD: ${{ secrets.CAMOUFOX_PASSWD }}
         run: make fetch
 
-      - name: Setup and bootstrap
+      - name: Setup source and sdk path
         run: |
           make setup-minimal
-          make mozbootstrap
+          sdk_path="$(xcrun --sdk macosx --show-sdk-path)"
+          if [[ -z "${sdk_path}" ]]; then
+            echo "Unable to resolve macOS SDK path from xcrun." >&2
+            exit 1
+          fi
+          echo "BUGOX_MACOS_SDK_PATH=${sdk_path}" >> "$GITHUB_ENV"
+          rustup target add x86_64-apple-darwin aarch64-apple-darwin
           mkdir -p dist
 
       - name: Build macOS
+        env:
+          BUGOX_MACOS_SDK_PATH: ${{ env.BUGOX_MACOS_SDK_PATH }}
         run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
 
       - name: Upload artifacts
-        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: BugoxBuilds-macos-${{ matrix.arch }}
@@ -80,24 +86,23 @@ jobs:
           pattern: BugoxBuilds-macos-*
           merge-multiple: true
 
-      - name: Skip when no artifacts are available
+      - name: Validate artifacts were produced
         id: check
         run: |
           count=$(find artifacts -type f | wc -l | tr -d ' ')
           echo "count=${count}" >> "$GITHUB_OUTPUT"
           if [[ "${count}" == "0" ]]; then
-            echo "No macOS artifacts produced; skipping release upload."
+            echo "No macOS artifacts produced." >&2
+            exit 1
           fi
 
       - name: Attach macOS artifacts to release
-        if: steps.check.outputs.count != '0'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag }}
           files: artifacts/**/*
 
       - name: Refresh release manifest after macOS upload
-        if: steps.check.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |

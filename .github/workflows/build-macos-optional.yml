@@ -16,41 +16,17 @@ permissions:
 
 jobs:
   build-macos:
-    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
 
     steps:
-      - name: Maximize build space
-        uses: AdityaGarg8/remove-unwanted-software@v4.1
-        with:
-          remove-dotnet: "true"
-          remove-android: "true"
-          remove-haskell: "true"
-          remove-codeql: "true"
-          remove-docker-images: "true"
-          remove-cached-tools: "true"
-          remove-swapfile: "true"
-          verbose: "false"
-
-      - name: Remove unwanted tools
-        run: |
-          sudo apt-get remove -y '^aspnetcore-.*' > /dev/null
-          sudo apt-get remove -y '^dotnet-.*' > /dev/null
-          sudo apt-get remove -y '^llvm-.*' > /dev/null
-          sudo apt-get remove -y 'php.*' > /dev/null
-          sudo apt-get remove -y '^mongodb-.*' > /dev/null
-          sudo apt-get remove -y '^mysql-.*' > /dev/null
-          sudo apt-get remove -y azure-cli google-chrome-stable firefox ${POWERSHELL} mono-devel libgl1-mesa-dri --fix-missing > /dev/null
-          if [[ (${CODENAME} = focal) || (${CODENAME} = jammy) ]]; then
-            sudo apt-get remove -y google-cloud-sdk --fix-missing > /dev/null
-            sudo apt-get remove -y google-cloud-cli --fix-missing > /dev/null
-          fi
-          sudo apt-get autoremove -y > /dev/null
-          sudo apt-get clean > /dev/null
-
       - uses: actions/checkout@v6
         with:
           fetch-depth: 1
@@ -65,18 +41,10 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Set up LLVM
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y lld-18 clang-18
-          sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
-
       - name: Install dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y msitools p7zip-full aria2 unzip
+          brew update
+          brew install p7zip aria2
 
       - name: Fetch source
         env:
@@ -89,41 +57,11 @@ jobs:
           make mozbootstrap
           mkdir -p dist
 
-      - name: Prepare custom macOS SDK (optional mirror)
-        env:
-          BUGLOGIN_MACOS_SDK_URL: ${{ secrets.BUGLOGIN_MACOS_SDK_URL }}
-          BUGLOGIN_MACOS_SDK_SHA256: ${{ secrets.BUGLOGIN_MACOS_SDK_SHA256 }}
-          BUGLOGIN_MACOS_SDK_AUTH_HEADER: ${{ secrets.BUGLOGIN_MACOS_SDK_AUTH_HEADER }}
-        run: bash ./scripts/prepare-macos-sdk.sh
-
-      - name: Check SDK availability
-        id: sdk
-        run: |
-          if [[ -n "${BUGOX_MACOS_SDK_PATH}" && -d "${BUGOX_MACOS_SDK_PATH}" ]]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "Using SDK path: ${BUGOX_MACOS_SDK_PATH}"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "macOS SDK not available. Skipping optional macOS build."
-          fi
-
-      - name: Create swap space
-        if: steps.sdk.outputs.available == 'true'
-        run: |
-          sudo fallocate -l 16G /swapfile
-          sudo chmod 600 /swapfile
-          sudo mkswap /swapfile
-          sudo swapon /swapfile
-          free -h
-
       - name: Build macOS
-        if: steps.sdk.outputs.available == 'true'
-        env:
-          BUGOX_MACOS_SDK_PATH: ${{ env.BUGOX_MACOS_SDK_PATH }}
         run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
 
       - name: Upload artifacts
-        if: always() && steps.sdk.outputs.available == 'true'
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: BugoxBuilds-macos-${{ matrix.arch }}

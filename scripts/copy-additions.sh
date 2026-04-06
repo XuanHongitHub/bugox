@@ -32,7 +32,7 @@ run 'cp -v ../patches/librewolf/pack_vs.py build/vs/'
 # Apply most recent `settings` repository files
 run 'mkdir -p lw'
 pushd lw > /dev/null
-run 'cp -v ../../settings/camoufox.cfg .'
+run 'if [ -f ../../settings/bugox.cfg ]; then cp -v ../../settings/bugox.cfg .; else cp -v ../../settings/camoufox.cfg .; fi'
 run 'cp -v ../../settings/distribution/policies.json .'
 run 'cp -v ../../settings/defaults/pref/local-settings.js .'
 run 'cp -v ../../settings/chrome.css .'

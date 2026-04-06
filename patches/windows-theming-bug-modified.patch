@@ -21,26 +21,26 @@ index 54d6b43fe126..116410bb89d9 100644
  # Note the manifest file exists in the tree, so we use the explicit filename
  # here.
 -EXTRA_DEPS += $(srcdir)/firefox.exe.manifest
-+EXTRA_DEPS += $(srcdir)/camoufox.exe.manifest
++EXTRA_DEPS += $(srcdir)/bugox.exe.manifest
  endif
 
  PROGRAMS_DEST = $(DIST)/bin
-diff --git a/browser/app/firefox.exe.manifest b/browser/app/camoufox.manifest
+diff --git a/browser/app/firefox.exe.manifest b/browser/app/bugox.manifest
 similarity index 96%
 rename from browser/app/firefox.exe.manifest
-rename to browser/app/camoufox.exe.manifest
+rename to browser/app/bugox.exe.manifest
 --- a/browser/app/firefox.exe.manifest
-+++ b/browser/app/camoufox.exe.manifest
++++ b/browser/app/bugox.exe.manifest
 @@ -3,10 +3,10 @@
  <assemblyIdentity
          version="1.0.0.0"
          processorArchitecture="*"
 -        name="Firefox"
-+        name="Camoufox"
++        name="Bugox"
          type="win32"
  />
 -<description>Firefox</description>
-+<description>Camoufox</description>
++<description>Bugox</description>
  <dependency>
          <dependentAssembly>
                  <assemblyIdentity

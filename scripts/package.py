@@ -65,7 +65,7 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
 
         # Create target_dir
         if target == 'macos':
-            target_dir = os.path.join(temp_dir, 'Camoufox.app', 'Contents', 'Resources')
+            target_dir = os.path.join(temp_dir, 'Bugox.app', 'Contents', 'Resources')
         else:
             target_dir = temp_dir
 
@@ -112,14 +112,14 @@ def add_includes_to_package(package_file, includes, fonts, new_file, target):
 def get_args():
     """Get CLI parameters"""
     parser = argparse.ArgumentParser(
-        description='Package Camoufox for different operating systems.'
+        description='Package Bugox for different operating systems.'
     )
     parser.add_argument('os', choices=['linux', 'macos', 'windows'], help='Target operating system')
     parser.add_argument(
         '--includes', nargs='+', help='List of files or directories to include in the package'
     )
-    parser.add_argument('--version', required=True, help='Camoufox version')
-    parser.add_argument('--release', required=True, help='Camoufox release number')
+    parser.add_argument('--version', required=True, help='Bugox version')
+    parser.add_argument('--release', required=True, help='Bugox release number')
     parser.add_argument(
         '--arch', choices=['x86_64', 'i686', 'arm64'], help='Architecture for Windows build'
     )

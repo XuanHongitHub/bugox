@@ -7,7 +7,7 @@ index d11c35ff9d..0aa4b9058b 100644
  # Note the manifest file exists in the tree, so we use the explicit filename
  # here.
 -EXTRA_DEPS += $(srcdir)/firefox.exe.manifest
-+EXTRA_DEPS += $(srcdir)/camoufox.exe.manifest
++EXTRA_DEPS += $(srcdir)/bugox.exe.manifest
  endif
  
  PROGRAMS_DEST = $(DIST)/bin
@@ -29,11 +29,11 @@ index 995b2fc869..4a03da3064 100644
          version="1.0.0.0"
          processorArchitecture="*"
 -        name="Firefox"
-+        name="Camoufox"
++        name="Bugox"
          type="win32"
  />
 -<description>Firefox</description>
-+<description>Camoufox</description>
++<description>Bugox</description>
  <dependency>
          <dependentAssembly>
                  <assemblyIdentity

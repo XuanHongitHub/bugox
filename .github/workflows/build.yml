@@ -15,7 +15,7 @@ jobs:
       fail-fast: false
       matrix:
         # Multi-platform branded release lane.
-        target: [windows, linux, macos]
+        target: [windows, linux]
         arch: [x86_64]
 
     steps:

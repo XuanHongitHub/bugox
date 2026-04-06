@@ -11,15 +11,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-linux-windows:
+  build-windows:
     runs-on: ubuntu-24.04
-    strategy:
-      matrix:
-        target: [linux, windows]
-        arch: [x86_64, arm64, i686]
-        exclude:
-          - target: windows
-            arch: arm64
 
     steps:
       - name: Maximize build space
@@ -43,10 +36,6 @@ jobs:
           sudo apt-get remove -y '^mongodb-.*' > /dev/null
           sudo apt-get remove -y '^mysql-.*' > /dev/null
           sudo apt-get remove -y azure-cli google-chrome-stable firefox ${POWERSHELL} mono-devel libgl1-mesa-dri --fix-missing > /dev/null
-          if [[ (${CODENAME} = focal) || (${CODENAME} = jammy) ]]; then
-            sudo apt-get remove -y google-cloud-sdk --fix-missing > /dev/null
-            sudo apt-get remove -y google-cloud-cli --fix-missing > /dev/null
-          fi
           sudo apt-get autoremove -y > /dev/null
           sudo apt-get clean > /dev/null
 
@@ -70,9 +59,6 @@ jobs:
           chmod +x llvm.sh
           sudo ./llvm.sh 18
           sudo apt-get install -y lld-18 clang-18
-          if [ "${{ matrix.arch }}" != "x86_64" ]; then
-            sudo apt-get install -y libc6-i386 lib32gcc-s1 lib32stdc++6 gcc-multilib g++-multilib
-          fi
           sudo update-alternatives --install /usr/bin/ld.lld ld.lld /usr/bin/ld.lld-18 100
 
       - name: Install dependencies
@@ -88,7 +74,7 @@ jobs:
       - name: Setup (CI mode)
         run: |
           make setup-minimal
-          rustup target add x86_64-unknown-linux-gnu i686-unknown-linux-gnu aarch64-unknown-linux-gnu x86_64-pc-windows-msvc i686-pc-windows-msvc
+          rustup target add x86_64-pc-windows-msvc
           mkdir -p dist
 
       - name: Create swap space
@@ -99,24 +85,17 @@ jobs:
           sudo swapon /swapfile
           free -h
 
-      - name: Build
-        run: python3 ./multibuild.py --target ${{ matrix.target }} --arch ${{ matrix.arch }}
+      - name: Build windows x86_64
+        run: python3 ./multibuild.py --target windows --arch x86_64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: BugoxBuilds-${{ matrix.target }}-${{ matrix.arch }}
+          name: BugoxBuilds-windows-x86_64
           path: dist/*
 
   build-macos:
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      matrix:
-        include:
-          - arch: x86_64
-            runner: macos-13
-          - arch: arm64
-            runner: macos-14
+    runs-on: macos-14
 
     steps:
       - uses: actions/checkout@v6
@@ -146,20 +125,20 @@ jobs:
       - name: Setup (CI mode)
         run: |
           make setup-minimal
-          rustup target add x86_64-apple-darwin aarch64-apple-darwin
+          rustup target add aarch64-apple-darwin
           mkdir -p dist
 
-      - name: Build macOS
-        run: python3 ./multibuild.py --target macos --arch ${{ matrix.arch }}
+      - name: Build macOS arm64
+        run: python3 ./multibuild.py --target macos --arch arm64
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: BugoxBuilds-macos-${{ matrix.arch }}
+          name: BugoxBuilds-macos-arm64
           path: dist/*
 
   release:
-    needs: [build-linux-windows, build-macos]
+    needs: [build-windows, build-macos]
     permissions:
       contents: write
     runs-on: ubuntu-latest

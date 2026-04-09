@@ -1,0 +1,314 @@
+name: Release Manifest & API Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag version (default: latest release)"
+        required: false
+      asset_url:
+        description: "Force a single download URL for selected platform"
+        required: false
+      platform:
+        description: "Platform key for asset_url override"
+        required: false
+        default: "windows-x64"
+      update_mode:
+        description: "optional|required"
+        required: false
+        default: "optional"
+      update_required:
+        description: "true|false"
+        required: false
+        default: "false"
+      min_supported_version:
+        description: "Minimum supported version for forced upgrades"
+        required: false
+      update_message:
+        description: "Human-readable update message"
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  manifest:
+    runs-on: ubuntu-latest
+    env:
+      BROWSER_SLUG: bugox
+      S3_ENDPOINT: https://sgp1.digitaloceanspaces.com
+      S3_BUCKET: mavelnut-login
+      RELEASE_API_URL: https://api.buglogin.com/v1/browser/release
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+    steps:
+      - name: Resolve release metadata and build manifest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          INPUT_ASSET_URL: ${{ github.event.inputs.asset_url }}
+          INPUT_PLATFORM: ${{ github.event.inputs.platform }}
+          INPUT_UPDATE_MODE: ${{ github.event.inputs.update_mode }}
+          INPUT_UPDATE_REQUIRED: ${{ github.event.inputs.update_required }}
+          INPUT_MIN_SUPPORTED_VERSION: ${{ github.event.inputs.min_supported_version }}
+          INPUT_UPDATE_MESSAGE: ${{ github.event.inputs.update_message }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import subprocess
+          import sys
+          from pathlib import Path
+
+          event_name = os.environ.get("GITHUB_EVENT_NAME", "").strip()
+          event_path = Path(os.environ["GITHUB_EVENT_PATH"])
+          event = json.loads(event_path.read_text(encoding="utf-8"))
+
+          input_version = os.environ.get("INPUT_VERSION", "").strip()
+          input_asset_url = os.environ.get("INPUT_ASSET_URL", "").strip()
+          input_platform = (os.environ.get("INPUT_PLATFORM", "windows-x64") or "windows-x64").strip()
+          update_mode = (os.environ.get("INPUT_UPDATE_MODE", "optional") or "optional").strip()
+          update_required = (os.environ.get("INPUT_UPDATE_REQUIRED", "false") or "false").strip().lower() in {"1", "true", "yes"}
+          min_supported_version = os.environ.get("INPUT_MIN_SUPPORTED_VERSION", "").strip()
+          update_message = os.environ.get("INPUT_UPDATE_MESSAGE", "").strip()
+          repo = os.environ["GITHUB_REPOSITORY"]
+
+          platforms = [
+            "windows-x64",
+            "windows-arm64",
+            "linux-x64",
+            "linux-arm64",
+            "macos-x64",
+            "macos-arm64",
+          ]
+          downloads = {platform: None for platform in platforms}
+          best_scores = {platform: -10_000 for platform in platforms}
+          sha256 = None
+
+          def api_json(path: str) -> dict:
+            completed = subprocess.run(
+              ["gh", "api", path],
+              check=True,
+              capture_output=True,
+              text=True,
+            )
+            return json.loads(completed.stdout)
+
+          release_obj = None
+          version = None
+
+          if event_name == "release":
+            release_obj = event.get("release") or {}
+            version = (release_obj.get("tag_name") or "").strip()
+
+          if input_version:
+            version = input_version
+
+          if release_obj is None:
+            if version:
+              release_obj = api_json(f"repos/{repo}/releases/tags/{version}")
+            else:
+              release_obj = api_json(f"repos/{repo}/releases/latest")
+              version = (release_obj.get("tag_name") or "").strip()
+
+          if not version:
+            raise SystemExit("Unable to resolve release version.")
+
+          assets = release_obj.get("assets") or []
+
+          def detect_platform(asset_name: str):
+            name = asset_name.lower()
+            if re.search(r"(win|windows).*(arm64|aarch64)|installer_arm64|win[._-]?arm64", name):
+              return "windows-arm64"
+            if re.search(r"(win|windows).*(x64|amd64|x86_64)|installer_x64|win64|win[._-]?(x64|x86_64)", name):
+              return "windows-x64"
+            if re.search(r"(linux|lin).*(arm64|aarch64)|lin[._-]?arm64", name):
+              return "linux-arm64"
+            if re.search(r"(linux|lin).*(x64|amd64|x86_64)|lin[._-]?(x64|x86_64)", name):
+              return "linux-x64"
+            if re.search(r"(mac|darwin|osx).*(arm64|aarch64)|mac[._-]?arm64", name):
+              return "macos-arm64"
+            if re.search(r"(mac|darwin|osx).*(x64|x86_64|amd64)|mac[._-]?(x64|x86_64)", name):
+              return "macos-x64"
+            return None
+
+          def asset_score(platform: str, asset_name: str) -> int:
+            name = asset_name.lower()
+            score = 0
+            if platform.startswith("windows"):
+              if name.endswith(".zip"):
+                score += 1000
+              if name.endswith(".exe"):
+                score += 200
+              if name.endswith(".msi"):
+                score += 150
+              if "installer" in name:
+                score -= 400
+            elif platform.startswith("linux"):
+              if name.endswith(".tar.xz"):
+                score += 1000
+              if name.endswith(".tar.gz"):
+                score += 800
+              if name.endswith(".zip"):
+                score += 600
+              if "appimage" in name:
+                score += 500
+            elif platform.startswith("macos"):
+              if name.endswith(".dmg"):
+                score += 1000
+              if name.endswith(".zip"):
+                score += 800
+              if name.endswith(".tar.gz"):
+                score += 700
+            if "portable" in name or "standalone" in name:
+              score += 50
+            return score
+
+          checksum_asset_url = None
+          for asset in assets:
+            name = str(asset.get("name") or "")
+            url = str(asset.get("browser_download_url") or "").strip()
+            if not url:
+              continue
+            if re.search(r"sha256|sha256sum|checksums?", name, re.IGNORECASE):
+              checksum_asset_url = url
+              continue
+            platform = detect_platform(name)
+            if platform:
+              score = asset_score(platform, name)
+              if score > best_scores[platform]:
+                best_scores[platform] = score
+                downloads[platform] = url
+
+          if checksum_asset_url:
+            try:
+              checksum_content = subprocess.run(
+                ["curl", "-fsSL", checksum_asset_url],
+                check=True,
+                capture_output=True,
+                text=True,
+              ).stdout
+              match = re.search(r"([A-Fa-f0-9]{64})", checksum_content)
+              if match:
+                sha256 = match.group(1)
+            except subprocess.CalledProcessError:
+              pass
+
+          if input_asset_url:
+            if input_platform not in downloads:
+              raise SystemExit(f"Unsupported platform override: {input_platform}")
+            downloads[input_platform] = input_asset_url
+
+          if not any(downloads.values()):
+            raise SystemExit("No downloadable assets resolved; refusing to publish empty manifest.")
+
+          primary_url = next((url for url in downloads.values() if url), "")
+          payload = {
+            "browser": os.environ["BROWSER_SLUG"],
+            "version": version,
+            "downloads": downloads,
+            "update_policy": {
+              "mode": update_mode,
+              "required": update_required,
+            },
+            "artifact": {
+              "url": primary_url,
+              "sha256": sha256,
+            },
+          }
+          if min_supported_version:
+            payload["update_policy"]["min_supported_version"] = min_supported_version
+          if update_message:
+            payload["update_policy"]["message"] = update_message
+
+          Path("release-manifest.json").write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+          )
+          print(f"Prepared manifest for {payload['browser']} {version}")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Install AWS CLI
+        run: |
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
+
+      - name: Upload resolved assets to S3 and rewrite manifest URLs
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.parse
+
+          manifest_path = pathlib.Path("release-manifest.json")
+          payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+          bucket = os.environ["S3_BUCKET"].strip()
+          endpoint = os.environ["S3_ENDPOINT"].strip()
+          slug = payload["browser"]
+          version = str(payload["version"]).strip().lstrip("v")
+          prefix = f"releases/browser/{slug}/v{version}"
+
+          tmp_dir = pathlib.Path("/tmp/browser-release-assets")
+          tmp_dir.mkdir(parents=True, exist_ok=True)
+
+          new_downloads = {}
+          for platform, source_url in (payload.get("downloads") or {}).items():
+            if not source_url:
+              new_downloads[platform] = None
+              continue
+
+            parsed = urllib.parse.urlparse(source_url)
+            filename = pathlib.Path(parsed.path).name
+            if not filename:
+              raise SystemExit(f"Cannot resolve filename from URL: {source_url}")
+
+            local_file = tmp_dir / f"{platform}-{filename}"
+            subprocess.run(
+              ["curl", "-fL", "--retry", "3", "--retry-delay", "2", "-o", str(local_file), source_url],
+              check=True,
+            )
+
+            s3_key = f"{prefix}/{filename}"
+            s3_uri = f"s3://{bucket}/{s3_key}"
+            subprocess.run(
+              [
+                "aws", "s3", "cp", str(local_file), s3_uri,
+                "--endpoint-url", endpoint,
+                "--region", "sgp1",
+                "--acl", "public-read",
+              ],
+              check=True,
+            )
+
+            public_url = f"https://{bucket}.sgp1.digitaloceanspaces.com/{s3_key}"
+            new_downloads[platform] = public_url
+
+          payload["downloads"] = new_downloads
+          first_url = next((v for v in new_downloads.values() if v), None)
+          payload.setdefault("artifact", {})
+          payload["artifact"]["url"] = first_url
+
+          manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Attach manifest to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-manifest.json
+
+      - name: Publish manifest to BugLogin API
+        run: |
+          set -euo pipefail
+          curl -fsSL -X POST "${RELEASE_API_URL}" \
+            -H "Content-Type: application/json" \
+            --data-binary @release-manifest.json

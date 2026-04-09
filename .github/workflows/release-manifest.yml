@@ -300,6 +300,94 @@ jobs:
           print(json.dumps(payload, ensure_ascii=False, indent=2))
           PY
 
+
+      - name: Persist versioned manifest history on S3
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 - <<'PY2'
+          import json
+          with open("release-manifest.json", "r", encoding="utf-8") as f:
+              payload = json.load(f)
+          print(str(payload.get("version", "")).strip().lstrip("v"))
+          PY2
+          )
+
+          if [ -z "$VERSION" ]; then
+            echo "Cannot resolve version from release-manifest.json"
+            exit 1
+          fi
+
+          KEY_PREFIX="releases/browser/${BROWSER_SLUG}"
+          VERSION_KEY="${KEY_PREFIX}/manifests/v${VERSION}.json"
+          INDEX_KEY="${KEY_PREFIX}/manifests/index.json"
+
+          aws s3 cp release-manifest.json "s3://${S3_BUCKET}/${VERSION_KEY}"             --endpoint-url "$S3_ENDPOINT" --region sgp1 --acl public-read             --content-type "application/json"
+
+          aws s3 cp "s3://${S3_BUCKET}/${INDEX_KEY}" /tmp/browser-manifest-index.json             --endpoint-url "$S3_ENDPOINT" --region sgp1 || true
+
+          python3 - <<'PY2'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          manifest = json.loads(Path("release-manifest.json").read_text(encoding="utf-8"))
+          index_path = Path('/tmp/browser-manifest-index.json')
+          if index_path.exists():
+              try:
+                  index = json.loads(index_path.read_text(encoding='utf-8'))
+              except Exception:
+                  index = {}
+          else:
+              index = {}
+
+          versions = index.get('versions')
+          if not isinstance(versions, list):
+              versions = []
+
+          current_version = str(manifest.get('version', '')).strip()
+          current_downloads = manifest.get('downloads') or {}
+
+          # Remove same version if existed, then append newest snapshot.
+          versions = [v for v in versions if str(v.get('version', '')).strip() != current_version]
+          versions.append({
+              'version': current_version,
+              'downloads': current_downloads,
+              'update_policy': manifest.get('update_policy') or {},
+              'updated_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+          })
+
+          # Keep deterministic order by semantic-ish tuple fallback lexicographic.
+          def key(item):
+              value = str(item.get('version', '')).lstrip('v')
+              parts = value.split('.')
+              nums = []
+              for part in parts[:3]:
+                  n = ''
+                  for ch in part:
+                      if ch.isdigit():
+                          n += ch
+                      else:
+                          break
+                  nums.append(int(n or 0))
+              while len(nums) < 3:
+                  nums.append(0)
+              return tuple(nums), value
+
+          versions.sort(key=key, reverse=True)
+
+          index['browser'] = manifest.get('browser')
+          index['latest_version'] = current_version
+          index['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          index['versions'] = versions
+
+          Path('/tmp/browser-manifest-index.json').write_text(
+              json.dumps(index, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY2
+
+          aws s3 cp /tmp/browser-manifest-index.json "s3://${S3_BUCKET}/${INDEX_KEY}"             --endpoint-url "$S3_ENDPOINT" --region sgp1 --acl public-read             --content-type "application/json"
+
       - name: Attach manifest to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2

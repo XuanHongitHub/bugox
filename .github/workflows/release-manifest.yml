@@ -38,6 +38,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       BROWSER_SLUG: bugox
+      S3_ENDPOINT: https://sgp1.digitaloceanspaces.com
+      S3_BUCKET: mavelnut-login
+      AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
     steps:
       - name: Resolve release metadata and build manifest
         env:
@@ -114,7 +118,7 @@ jobs:
 
           assets = release_obj.get("assets") or []
 
-          def detect_platform(asset_name: str) -> str | None:
+          def detect_platform(asset_name: str):
             name = asset_name.lower()
             if re.search(r"(win|windows).*(arm64|aarch64)|installer_arm64|win[._-]?arm64", name):
               return "windows-arm64"
@@ -227,36 +231,215 @@ jobs:
           print(json.dumps(payload, ensure_ascii=False, indent=2))
           PY
 
+      - name: Install AWS CLI
+        run: |
+          curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+          unzip -q /tmp/awscliv2.zip -d /tmp
+          sudo /tmp/aws/install --update
+
+      - name: Upload resolved assets to S3 and rewrite manifest URLs
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import pathlib
+          import subprocess
+          import urllib.parse
+
+          manifest_path = pathlib.Path("release-manifest.json")
+          payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+          bucket = os.environ["S3_BUCKET"].strip()
+          endpoint = os.environ["S3_ENDPOINT"].strip()
+          slug = payload["browser"]
+          version = str(payload["version"]).strip().lstrip("v")
+          prefix = f"releases/browser/{slug}/v{version}"
+
+          tmp_dir = pathlib.Path("/tmp/browser-release-assets")
+          tmp_dir.mkdir(parents=True, exist_ok=True)
+
+          new_downloads = {}
+          for platform, source_url in (payload.get("downloads") or {}).items():
+            if not source_url:
+              new_downloads[platform] = None
+              continue
+
+            parsed = urllib.parse.urlparse(source_url)
+            filename = pathlib.Path(parsed.path).name
+            if not filename:
+              raise SystemExit(f"Cannot resolve filename from URL: {source_url}")
+
+            local_file = tmp_dir / f"{platform}-{filename}"
+            subprocess.run(
+              ["curl", "-fL", "--retry", "3", "--retry-delay", "2", "-o", str(local_file), source_url],
+              check=True,
+            )
+
+            s3_key = f"{prefix}/{filename}"
+            s3_uri = f"s3://{bucket}/{s3_key}"
+            subprocess.run(
+              [
+                "aws", "s3", "cp", str(local_file), s3_uri,
+                "--endpoint-url", endpoint,
+                "--region", "sgp1",
+                "--acl", "public-read",
+              ],
+              check=True,
+            )
+
+            public_url = f"https://{bucket}.sgp1.digitaloceanspaces.com/{s3_key}"
+            new_downloads[platform] = public_url
+
+          payload["downloads"] = new_downloads
+          first_url = next((v for v in new_downloads.values() if v), None)
+          payload.setdefault("artifact", {})
+          payload["artifact"]["url"] = first_url
+
+          manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+
+      - name: Persist versioned manifest history on S3
+        run: |
+          set -euo pipefail
+          VERSION=$(python3 - <<'PY2'
+          import json
+          with open("release-manifest.json", "r", encoding="utf-8") as f:
+              payload = json.load(f)
+          print(str(payload.get("version", "")).strip().lstrip("v"))
+          PY2
+          )
+
+          if [ -z "$VERSION" ]; then
+            echo "Cannot resolve version from release-manifest.json"
+            exit 1
+          fi
+
+          KEY_PREFIX="releases/browser/${BROWSER_SLUG}"
+          VERSION_KEY="${KEY_PREFIX}/manifests/v${VERSION}.json"
+          INDEX_KEY="${KEY_PREFIX}/manifests/index.json"
+
+          aws s3 cp release-manifest.json "s3://${S3_BUCKET}/${VERSION_KEY}"             --endpoint-url "$S3_ENDPOINT" --region sgp1 --acl public-read             --content-type "application/json"
+
+          aws s3 cp "s3://${S3_BUCKET}/${INDEX_KEY}" /tmp/browser-manifest-index.json             --endpoint-url "$S3_ENDPOINT" --region sgp1 || true
+
+          python3 - <<'PY2'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          manifest = json.loads(Path("release-manifest.json").read_text(encoding="utf-8"))
+          index_path = Path('/tmp/browser-manifest-index.json')
+          if index_path.exists():
+              try:
+                  index = json.loads(index_path.read_text(encoding='utf-8'))
+              except Exception:
+                  index = {}
+          else:
+              index = {}
+
+          versions = index.get('versions')
+          if not isinstance(versions, list):
+              versions = []
+
+          current_version = str(manifest.get('version', '')).strip()
+          current_downloads = manifest.get('downloads') or {}
+
+          # Remove same version if existed, then append newest snapshot.
+          versions = [v for v in versions if str(v.get('version', '')).strip() != current_version]
+          versions.append({
+              'version': current_version,
+              'downloads': current_downloads,
+              'update_policy': manifest.get('update_policy') or {},
+              'updated_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+          })
+
+          # Keep deterministic order by semantic-ish tuple fallback lexicographic.
+          def key(item):
+              value = str(item.get('version', '')).lstrip('v')
+              parts = value.split('.')
+              nums = []
+              for part in parts[:3]:
+                  n = ''
+                  for ch in part:
+                      if ch.isdigit():
+                          n += ch
+                      else:
+                          break
+                  nums.append(int(n or 0))
+              while len(nums) < 3:
+                  nums.append(0)
+              return tuple(nums), value
+
+          versions.sort(key=key, reverse=True)
+
+          index['browser'] = manifest.get('browser')
+          index['latest_version'] = current_version
+          index['updated_at'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+          index['versions'] = versions
+
+          Path('/tmp/browser-manifest-index.json').write_text(
+              json.dumps(index, ensure_ascii=False, indent=2) + '\n',
+              encoding='utf-8',
+          )
+          PY2
+
+          aws s3 cp /tmp/browser-manifest-index.json "s3://${S3_BUCKET}/${INDEX_KEY}"             --endpoint-url "$S3_ENDPOINT" --region sgp1 --acl public-read             --content-type "application/json"
+
       - name: Attach manifest to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
           files: release-manifest.json
 
-      - name: Publish manifest to BugLogin API
-        env:
-          BUGLOGIN_RELEASE_API_URL: ${{ secrets.BUGLOGIN_RELEASE_API_URL }}
-          BUGLOGIN_RELEASE_BASE_URL: ${{ secrets.BUGLOGIN_RELEASE_BASE_URL }}
-          BUGLOGIN_RELEASE_API_TOKEN: ${{ secrets.BUGLOGIN_RELEASE_API_TOKEN }}
-          BUGLOGIN_RELEASE_TOKEN: ${{ secrets.BUGLOGIN_RELEASE_TOKEN }}
+      - name: Update browser-release state in S3 (no API)
         run: |
-          API_URL="${BUGLOGIN_RELEASE_API_URL}"
-          if [[ -z "${API_URL}" && -n "${BUGLOGIN_RELEASE_BASE_URL}" ]]; then
-            API_URL="${BUGLOGIN_RELEASE_BASE_URL%/}/v1/browser/release"
-          fi
-          API_TOKEN="${BUGLOGIN_RELEASE_API_TOKEN}"
-          if [[ -z "${API_TOKEN}" && -n "${BUGLOGIN_RELEASE_TOKEN}" ]]; then
-            API_TOKEN="${BUGLOGIN_RELEASE_TOKEN}"
-          fi
-          if [[ -z "${API_URL}" ]]; then
-            echo "Missing release API URL secret (BUGLOGIN_RELEASE_API_URL or BUGLOGIN_RELEASE_BASE_URL)." >&2
-            exit 1
-          fi
-          if [[ -z "${API_TOKEN}" ]]; then
-            echo "Missing release API token secret (BUGLOGIN_RELEASE_API_TOKEN or BUGLOGIN_RELEASE_TOKEN)." >&2
-            exit 1
-          fi
-          curl -fsSL -X POST "${API_URL}" \
-            -H "Authorization: Bearer ${API_TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data-binary @release-manifest.json
+          set -euo pipefail
+
+          STATE_KEY="meta/browser-release-state.json"
+          aws s3 cp "s3://${S3_BUCKET}/${STATE_KEY}" /tmp/browser-release-state.json \
+            --endpoint-url "$S3_ENDPOINT" --region sgp1 || true
+
+          python3 - <<'PY2'
+          import json
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          manifest = json.loads(Path("release-manifest.json").read_text(encoding="utf-8"))
+
+          state_path = Path("/tmp/browser-release-state.json")
+          if state_path.exists():
+            try:
+              state = json.loads(state_path.read_text(encoding="utf-8"))
+            except Exception:
+              state = {}
+          else:
+            state = {}
+
+          browser = str(manifest.get("browser", "")).strip()
+          if not browser:
+            raise SystemExit("Missing browser in release-manifest.json")
+
+          state_browser = state.get("browser")
+          if not isinstance(state_browser, dict):
+            state_browser = {}
+
+          state_browser[browser] = {
+            "version": manifest.get("version"),
+            "downloads": manifest.get("downloads") or {},
+            "update_policy": manifest.get("update_policy") or {},
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+          }
+          state["browser"] = state_browser
+
+          state_path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+          )
+          print(json.dumps(state, ensure_ascii=False, indent=2))
+          PY2
+
+          aws s3 cp /tmp/browser-release-state.json "s3://${S3_BUCKET}/${STATE_KEY}" \
+            --endpoint-url "$S3_ENDPOINT" --region sgp1 --acl public-read \
+            --content-type "application/json"
